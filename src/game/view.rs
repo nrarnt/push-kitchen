@@ -2,7 +2,9 @@ use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 
 use super::Selected;
+use super::input;
 use super::levels::LEVELS;
+use super::pointer::{Button, TouchMode};
 use super::session::Session;
 use crate::puzzle::{Board, Dir, Item, Pos, StationKind, Tile};
 
@@ -18,6 +20,7 @@ const SLIDE_SECONDS: f32 = 0.12;
 pub const BACKGROUND: Color = Color::srgb(0.10, 0.10, 0.13);
 pub const LIGHT_TEXT: Color = Color::srgb(0.96, 0.96, 0.96);
 pub const DIM_TEXT: Color = Color::srgb(0.60, 0.60, 0.66);
+const BUTTON: Color = Color::srgb(0.26, 0.29, 0.40);
 
 const CHEF_SPRITE: &str = "sprites/chef.png";
 
@@ -129,6 +132,22 @@ pub fn caption(
     )
 }
 
+/// Draws a touch button: a coloured rectangle with its label on top.
+pub fn spawn_button(commands: &mut Commands, button: Button) {
+    commands.spawn((
+        Drawn,
+        Sprite::from_color(BUTTON, Button::SIZE),
+        Transform::from_translation(button.centre.extend(3.0)),
+    ));
+    commands.spawn((
+        Drawn,
+        Text2d::new(button.label),
+        TextFont::from_font_size(32.0),
+        TextColor(LIGHT_TEXT),
+        Transform::from_translation(button.centre.extend(3.1)),
+    ));
+}
+
 /// Makes a sprite glide to its square from where it was a moment ago.
 #[derive(Component)]
 pub struct Slide {
@@ -223,6 +242,7 @@ pub fn draw_board(
     assets: Res<AssetServer>,
     session: Res<Session>,
     selected: Res<Selected>,
+    touch: Res<TouchMode>,
     drawn: Query<Entity, With<Drawn>>,
 ) {
     clear(&mut commands, &drawn);
@@ -266,17 +286,24 @@ pub fn draw_board(
     let from = previous.map(|before| centre(before.chef()));
     spawn_piece(&mut commands, image, 0.9, 2.0, from, centre(board.chef()));
 
-    let (title, keys) = if board.is_solved() {
-        ("Solved!", "Enter: next kitchen    Z: undo    Esc: menu")
-    } else {
-        (
-            LEVELS[selected.0].name,
-            "Arrows or WASD: move    Z: undo    R: restart    Esc: menu",
-        )
-    };
+    let solved = board.is_solved();
+    let title = if solved { "Solved!" } else { LEVELS[selected.0].name };
     let board_top = height as f32 * TILE_SIZE / 2.0;
     commands.spawn((Drawn, caption(title, 40.0, LIGHT_TEXT, board_top + 40.0)));
-    commands.spawn((Drawn, caption(keys, 20.0, DIM_TEXT, -board_top - 30.0)));
+
+    // Under the board: buttons for fingers, or a reminder of the keys.
+    if touch.0 {
+        for button in input::buttons(solved) {
+            spawn_button(&mut commands, button);
+        }
+    } else {
+        let keys = if solved {
+            "Enter: next kitchen    Z: undo    Esc: menu"
+        } else {
+            "Arrows or WASD: move    Z: undo    R: restart    Esc: menu"
+        };
+        commands.spawn((Drawn, caption(keys, 20.0, DIM_TEXT, -board_top - 30.0)));
+    }
 }
 
 #[cfg(test)]
@@ -396,8 +423,9 @@ mod tests {
 
     #[test]
     fn every_level_fits_in_the_view() {
-        // Room for the title above the board and the key help below it.
-        let captions = 2.0 * 64.0;
+        // Room for the title above the board, and below it the touch
+        // buttons (which need more than the key help they replace).
+        let captions = 64.0 + 104.0;
         for level in LEVELS {
             let board = level.board();
             let width = board.width() as f32 * TILE_SIZE;

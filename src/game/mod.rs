@@ -1,7 +1,9 @@
-//! The Bevy layer: shows the puzzle on screen and feeds it key presses.
+//! The Bevy layer: shows the puzzle on screen and feeds it key presses,
+//! taps and swipes.
 
 mod input;
 mod levels;
+mod pointer;
 mod progress;
 mod session;
 mod sound;
@@ -12,6 +14,7 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 
 use levels::LEVELS;
+use pointer::{Gesture, TouchMode};
 use progress::Progress;
 use session::Session;
 
@@ -54,11 +57,15 @@ fn preload_assets(mut commands: Commands, assets: Res<AssetServer>) {
     });
 }
 
-/// Throws away key presses nobody has acted on yet. Run whenever the screen
-/// changes, so that a key meant for the old screen is not read again by the
-/// new one.
-fn forget_keys(mut keys: ResMut<Messages<KeyboardInput>>) {
+/// Throws away key presses, taps and swipes nobody has acted on yet. Run
+/// whenever the screen changes, so that one meant for the old screen is not
+/// read again by the new one.
+fn forget_input(
+    mut keys: ResMut<Messages<KeyboardInput>>,
+    mut gestures: ResMut<Messages<Gesture>>,
+) {
     keys.clear();
+    gestures.clear();
 }
 
 /// Puts the selected level on the table, fresh.
@@ -94,33 +101,48 @@ impl Plugin for GamePlugin {
         });
 
         app.init_state::<Screen>()
+            .add_message::<Gesture>()
+            .init_resource::<TouchMode>()
             .insert_resource(ClearColor(view::BACKGROUND))
             .insert_resource(Selected(first_unsolved(&progress)))
             .insert_resource(progress)
             .insert_resource(self.save_slot.clone())
             .add_systems(Startup, (view::spawn_camera, preload_assets))
-            .add_systems(OnEnter(Screen::Menu), (forget_keys, ui::draw_menu))
-            .add_systems(OnEnter(Screen::Playing), (forget_keys, start_level))
+            .add_systems(OnEnter(Screen::Menu), (forget_input, ui::draw_menu))
+            .add_systems(OnEnter(Screen::Playing), (forget_input, start_level))
             .add_systems(
                 Update,
                 (
+                    // First of all, so that this frame's taps and swipes
+                    // reach the screen that is showing.
+                    pointer::read_pointer,
                     (
-                        ui::handle_menu_input,
-                        ui::draw_menu.run_if(resource_changed::<Selected>),
-                    )
-                        .chain()
-                        .run_if(in_state(Screen::Menu)),
-                    (
-                        input::handle_input,
-                        // Only on frames where the session was touched.
-                        (record_solved, view::draw_board)
+                        (
+                            ui::handle_menu_input,
+                            // Redrawn when the selection moves, and when
+                            // touch mode switches the Play button on.
+                            ui::draw_menu.run_if(
+                                resource_changed::<Selected>
+                                    .or_eager(resource_changed::<TouchMode>),
+                            ),
+                        )
                             .chain()
-                            .run_if(resource_exists_and_changed::<Session>),
-                        view::slide,
-                    )
-                        .chain()
-                        .run_if(in_state(Screen::Playing)),
-                ),
+                            .run_if(in_state(Screen::Menu)),
+                        (
+                            input::handle_input,
+                            // Only on frames where the session was touched.
+                            record_solved.run_if(resource_exists_and_changed::<Session>),
+                            view::draw_board.run_if(
+                                resource_exists_and_changed::<Session>
+                                    .or_eager(resource_changed::<TouchMode>),
+                            ),
+                            view::slide,
+                        )
+                            .chain()
+                            .run_if(in_state(Screen::Playing)),
+                    ),
+                )
+                    .chain(),
             );
     }
 }
@@ -151,6 +173,9 @@ mod tests {
             .init_asset::<Image>()
             .init_asset::<AudioSource>()
             .add_message::<KeyboardInput>()
+            // What `read_pointer` reads. With no window, it has nothing to do.
+            .init_resource::<Touches>()
+            .init_resource::<ButtonInput<MouseButton>>()
             .add_plugins(GamePlugin { save_slot });
         app.update();
         app
@@ -313,6 +338,71 @@ mod tests {
 
         assert_eq!(screen(&app), Screen::Menu);
         assert_eq!(selected(&app), 0);
+    }
+
+    /// Tells the game about a tap or swipe, as `read_pointer` would.
+    fn gesture(app: &mut App, gesture: Gesture) {
+        app.world_mut().write_message(gesture);
+    }
+
+    fn touch_the_screen(app: &mut App) {
+        app.world_mut().resource_mut::<TouchMode>().0 = true;
+        app.update();
+    }
+
+    #[test]
+    fn a_swipe_moves_the_chef() {
+        let mut app = headless_game(scratch_slot("swipe"));
+        tap(&mut app, KeyCode::Enter);
+        let start = LEVELS[0].board().chef();
+
+        gesture(&mut app, Gesture::Swipe(crate::puzzle::Dir::Down));
+        app.update();
+
+        let chef = app.world().resource::<Session>().board().chef();
+        assert_eq!(chef, Pos::new(start.x, start.y + 1));
+    }
+
+    #[test]
+    fn tapping_a_level_in_the_menu_selects_it() {
+        let mut app = headless_game(scratch_slot("tap-level"));
+        gesture(&mut app, Gesture::Tap(Vec2::new(0.0, ui::line_y(3))));
+        app.update();
+
+        assert_eq!(selected(&app), 3);
+        assert_eq!(screen(&app), Screen::Menu);
+    }
+
+    #[test]
+    fn touching_the_screen_adds_a_play_button_to_the_menu() {
+        let mut app = headless_game(scratch_slot("touch-menu"));
+        let before = drawn_count(&mut app);
+        touch_the_screen(&mut app);
+        // The button is two things: its rectangle and its label.
+        assert_eq!(drawn_count(&mut app), before + 2);
+    }
+
+    #[test]
+    fn touching_the_screen_swaps_the_key_help_for_three_buttons() {
+        let mut app = headless_game(scratch_slot("touch-level"));
+        tap(&mut app, KeyCode::Enter);
+        let before = drawn_count(&mut app);
+        touch_the_screen(&mut app);
+        assert_eq!(drawn_count(&mut app), before - 1 + 3 * 2);
+    }
+
+    #[test]
+    fn a_gesture_made_in_the_menu_is_not_acted_on_again_by_the_level() {
+        let mut app = headless_game(scratch_slot("gesture-leak"));
+        // Swiping up does nothing at the top of the menu, but would move the chef.
+        gesture(&mut app, Gesture::Swipe(crate::puzzle::Dir::Up));
+        press(&mut app, KeyCode::Enter, false);
+        app.update();
+        app.update();
+
+        assert_eq!(screen(&app), Screen::Playing);
+        let chef = app.world().resource::<Session>().board().chef();
+        assert_eq!(chef, LEVELS[0].board().chef());
     }
 
     #[test]

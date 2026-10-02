@@ -4,15 +4,17 @@ A calm kitchen puzzle game. Push ingredients over chopping boards and stoves, co
 
 **Play it in your browser: https://nrarnt.github.io/push-kitchen/**
 
-It needs a keyboard.
+It plays with a keyboard or, on a phone or tablet, by touch.
 
-| Key | Does |
-|---|---|
-| Arrows or WASD | move the chef |
-| Z | undo |
-| R | restart the kitchen |
-| Enter | next kitchen, once this one is solved |
-| Esc | back to the menu |
+| Keyboard | Touch | Does |
+|---|---|---|
+| Arrows or WASD | swipe | move the chef |
+| Z | Undo button | undo |
+| R | Restart button | restart the kitchen |
+| Enter | Next button | next kitchen, once this one is solved |
+| Esc | Menu button | back to the menu |
+
+In the menu, tap a kitchen and then Play. The buttons appear the first time the screen is touched.
 
 Written in Rust with [Bevy](https://bevy.org), as a way to learn Rust. [docs/design.md](docs/design.md) describes the rules, the level file format and how the code is laid out.
 

@@ -86,7 +86,8 @@ push-kitchen/
       levels.rs           the list of kitchens, baked in with include_str!
       progress.rs         which kitchens are solved, saved to a file (or the browser's storage)
       session.rs          Resource: current Board + undo history (Vec<Board>)
-      input.rs            keys while playing -> move / undo / restart / next / menu
+      input.rs            keys, swipes and button taps while playing -> move / undo / restart / next / menu
+      pointer.rs          fingers and the mouse -> taps and swipes (Gesture)
       view.rs             draws the Board with sprites, slides what moved
       sound.rs            which sound a move makes, and playing it
       ui.rs               level select menu
@@ -114,14 +115,24 @@ What differs in a browser:
 - Assets are fetched over HTTP one by one, so they are preloaded by name (a browser cannot list a folder).
 - Progress goes to `localStorage` instead of a file (`SaveSlot` in `progress.rs`).
 - Browsers keep sound off until the first key press or click; `index.html` switches it on then.
-- Keyboard only: there are no touch controls, so it is not playable on a phone.
+- On a phone it is played by touch (see below). The page stops the browser from scrolling or zooming when a finger drags across the game.
 - A browser stops drawing a page that is not visible, so the game stands still in a background tab and carries on when the tab is shown again.
+
+## Touch
+
+`pointer.rs` watches fingers (and the mouse, which counts as one more finger) and reports two kinds of `Gesture`: a tap at a point in the view, or a swipe in a direction. A swipe is reported as soon as the finger has travelled 24 screen pixels, without waiting for it to lift, and once per touch. The screens read gestures the same way they read keys.
+
+- **In a kitchen:** a swipe anywhere moves the chef one square.
+- **Touch mode:** the first time the screen is touched, the game starts showing buttons for what a keyboard has keys for. Under a kitchen: Undo, Restart (Next once it is solved) and Menu, in place of the key help. In the menu: Play.
+- **In the menu:** tapping a kitchen selects it and Play starts it. A tap does not start a kitchen directly, because a phone shows the list at about half size and the lines are too close together to hit the right one every time. Swiping up or down moves the selection one line.
+
+Buttons are 230 x 84 in the view, about 110 x 40 points on a phone. A test checks that every kitchen leaves room for them.
 
 ## Keyboard input
 
 The game reads key presses one by one, in the order they happened (Bevy's `KeyboardInput` messages), instead of asking each frame which keys are down. That way no press is lost when several arrive in the same frame, for example after a stutter. A key that is held down counts once.
 
-When the screen changes (menu to level, level to menu, level to next level), key presses that have not been handled yet are thrown away, so a key meant for the old screen is never acted on by the new one.
+When the screen changes (menu to level, level to menu, level to next level), key presses, taps and swipes that have not been handled yet are thrown away, so one meant for the old screen is never acted on by the new one.
 
 There is no separate "solved" state: a solved kitchen stays on screen in `Playing`, shows "Solved!", and Enter moves on to the next one.
 
