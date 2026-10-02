@@ -4,11 +4,13 @@ mod input;
 mod levels;
 mod progress;
 mod session;
+mod sound;
 mod ui;
 mod view;
 
 use std::path::PathBuf;
 
+use bevy::asset::LoadedFolder;
 use bevy::prelude::*;
 
 use levels::LEVELS;
@@ -36,6 +38,20 @@ fn first_unsolved(progress: &Progress) -> usize {
         .iter()
         .position(|level| !progress.is_solved(level.id))
         .unwrap_or(0)
+}
+
+/// Holds on to every picture and sound for as long as the game runs. Bevy
+/// drops a file from memory once nothing uses it, and would otherwise read
+/// the sprites from disk again each time a level starts.
+#[derive(Resource)]
+struct Preloaded {
+    _folders: [Handle<LoadedFolder>; 2],
+}
+
+fn preload_assets(mut commands: Commands, assets: Res<AssetServer>) {
+    commands.insert_resource(Preloaded {
+        _folders: [assets.load_folder("sprites"), assets.load_folder("sounds")],
+    });
 }
 
 /// Puts the selected level on the table, fresh.
@@ -75,7 +91,7 @@ impl Plugin for GamePlugin {
             .insert_resource(Selected(first_unsolved(&progress)))
             .insert_resource(progress)
             .insert_resource(ProgressFile(self.progress_file.clone()))
-            .add_systems(Startup, view::spawn_camera)
+            .add_systems(Startup, (view::spawn_camera, preload_assets))
             .add_systems(OnEnter(Screen::Menu), ui::draw_menu)
             .add_systems(OnEnter(Screen::Playing), start_level)
             .add_systems(
@@ -93,6 +109,7 @@ impl Plugin for GamePlugin {
                         (record_solved, view::draw_board)
                             .chain()
                             .run_if(resource_exists_and_changed::<Session>),
+                        view::slide,
                     )
                         .chain()
                         .run_if(in_state(Screen::Playing)),
@@ -121,7 +138,9 @@ mod tests {
     /// The game without a window: just enough of Bevy to run our systems.
     fn headless_game(progress_file: PathBuf) -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, StatesPlugin))
+        app.add_plugins((MinimalPlugins, StatesPlugin, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<AudioSource>()
             .init_resource::<ButtonInput<KeyCode>>()
             .add_plugins(GamePlugin { progress_file });
         app.update();
@@ -234,6 +253,44 @@ mod tests {
         tap(&mut app, KeyCode::ArrowDown);
 
         assert_eq!(drawn_count(&mut app), before);
+    }
+
+    fn count<C: Component>(app: &mut App) -> usize {
+        app.world_mut().query::<&C>().iter(app.world()).count()
+    }
+
+    #[test]
+    fn nothing_slides_when_a_level_starts() {
+        let mut app = headless_game(scratch_file("slide-none"));
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(count::<view::Slide>(&mut app), 0);
+    }
+
+    #[test]
+    fn walking_slides_the_chef() {
+        let mut app = headless_game(scratch_file("slide-chef"));
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::ArrowDown);
+        assert_eq!(count::<view::Slide>(&mut app), 1);
+    }
+
+    #[test]
+    fn pushing_slides_the_chef_and_the_item() {
+        let mut app = headless_game(scratch_file("slide-push"));
+        tap(&mut app, KeyCode::Enter);
+        // All but the last key of the solution: the last of these is a push.
+        for key in &FIRST_LEVEL_SOLUTION[..4] {
+            tap(&mut app, *key);
+        }
+        assert_eq!(count::<view::Slide>(&mut app), 2);
+    }
+
+    #[test]
+    fn a_move_plays_one_sound() {
+        let mut app = headless_game(scratch_file("sound"));
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::ArrowDown);
+        assert_eq!(count::<AudioPlayer>(&mut app), 1);
     }
 
     #[test]

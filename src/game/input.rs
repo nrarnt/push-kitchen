@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use super::levels::LEVELS;
 use super::session::Session;
+use super::sound::{self, Sfx, sound_of_move};
 use super::{Screen, Selected};
 use crate::puzzle::Dir;
 
@@ -42,13 +43,23 @@ fn command(keys: &ButtonInput<KeyCode>) -> Option<Command> {
 }
 
 pub fn handle_input(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
     keys: Res<ButtonInput<KeyCode>>,
     mut session: ResMut<Session>,
     mut selected: ResMut<Selected>,
     mut screen: ResMut<NextState<Screen>>,
 ) {
     match command(&keys) {
-        Some(Command::Move(dir)) => session.step(dir),
+        Some(Command::Move(dir)) => {
+            session.step(dir);
+            let sfx = match session.previous() {
+                Some(before) => sound_of_move(before, session.board(), dir),
+                // Nothing changed: the chef walked into something solid.
+                None => Sfx::Bump,
+            };
+            sound::play(&mut commands, &assets, sfx);
+        }
         Some(Command::Undo) => session.undo(),
         Some(Command::Restart) => session.restart(),
         Some(Command::Next) if session.board().is_solved() => {

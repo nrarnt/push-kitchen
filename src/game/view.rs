@@ -3,18 +3,41 @@ use bevy::prelude::*;
 use super::Selected;
 use super::levels::LEVELS;
 use super::session::Session;
-use crate::puzzle::{Item, Pos, StationKind, Tile};
+use crate::puzzle::{Board, Dir, Item, Pos, StationKind, Tile};
 
 /// Side of one grid square, in pixels.
 const TILE_SIZE: f32 = 64.0;
-/// How much of its square an item fills.
-const ITEM_SCALE: f32 = 0.7;
+/// How long a sprite takes to slide one square.
+const SLIDE_SECONDS: f32 = 0.12;
 
 pub const BACKGROUND: Color = Color::srgb(0.10, 0.10, 0.13);
-const CHEF: Color = Color::srgb(0.95, 0.95, 0.98);
-const DARK_TEXT: Color = Color::srgb(0.12, 0.12, 0.14);
 pub const LIGHT_TEXT: Color = Color::srgb(0.96, 0.96, 0.96);
 pub const DIM_TEXT: Color = Color::srgb(0.60, 0.60, 0.66);
+
+const CHEF_SPRITE: &str = "sprites/chef.png";
+
+/// The picture of a tile, as a file inside the `assets` folder.
+fn tile_sprite(tile: Tile) -> &'static str {
+    match tile {
+        Tile::Floor => "sprites/floor.png",
+        Tile::Wall => "sprites/wall.png",
+        Tile::Station(StationKind::ChoppingBoard) => "sprites/chopping_board.png",
+        Tile::Station(StationKind::Stove) => "sprites/stove.png",
+        Tile::Hatch(_) => "sprites/hatch.png",
+    }
+}
+
+fn item_sprite(item: Item) -> &'static str {
+    match item {
+        Item::Tomato => "sprites/tomato.png",
+        Item::ChoppedTomato => "sprites/chopped_tomato.png",
+        Item::TomatoSoup => "sprites/tomato_soup.png",
+        Item::Bread => "sprites/bread.png",
+        Item::Cheese => "sprites/cheese.png",
+        Item::Sandwich => "sprites/sandwich.png",
+        Item::Toastie => "sprites/toastie.png",
+    }
+}
 
 /// Marks everything a screen drew, so it can be cleared again.
 #[derive(Component)]
@@ -27,47 +50,6 @@ pub fn clear(commands: &mut Commands, drawn: &Query<Entity, With<Drawn>>) {
     }
 }
 
-fn tile_colour(tile: Tile) -> Color {
-    match tile {
-        Tile::Floor => Color::srgb(0.87, 0.82, 0.72),
-        Tile::Wall => Color::srgb(0.24, 0.26, 0.32),
-        Tile::Station(StationKind::ChoppingBoard) => Color::srgb(0.58, 0.42, 0.28),
-        Tile::Station(StationKind::Stove) => Color::srgb(0.30, 0.42, 0.60),
-        Tile::Hatch(_) => Color::srgb(0.94, 0.94, 0.90),
-    }
-}
-
-fn station_name(station: StationKind) -> &'static str {
-    match station {
-        StationKind::ChoppingBoard => "chop",
-        StationKind::Stove => "stove",
-    }
-}
-
-fn item_colour(item: Item) -> Color {
-    match item {
-        Item::Tomato => Color::srgb(0.88, 0.22, 0.18),
-        Item::ChoppedTomato => Color::srgb(0.96, 0.50, 0.45),
-        Item::TomatoSoup => Color::srgb(0.96, 0.58, 0.16),
-        Item::Bread => Color::srgb(0.90, 0.76, 0.52),
-        Item::Cheese => Color::srgb(0.98, 0.86, 0.26),
-        Item::Sandwich => Color::srgb(0.80, 0.62, 0.36),
-        Item::Toastie => Color::srgb(0.66, 0.44, 0.20),
-    }
-}
-
-fn item_name(item: Item) -> &'static str {
-    match item {
-        Item::Tomato => "tomato",
-        Item::ChoppedTomato => "chopped",
-        Item::TomatoSoup => "soup",
-        Item::Bread => "bread",
-        Item::Cheese => "cheese",
-        Item::Sandwich => "sandwich",
-        Item::Toastie => "toastie",
-    }
-}
-
 /// Where the middle of a grid square goes on screen, for a board of the given
 /// size centred on the origin. Bevy's `y` grows upwards, the grid's downwards.
 fn square_centre(pos: Pos, width: i32, height: i32) -> Vec2 {
@@ -76,25 +58,14 @@ fn square_centre(pos: Pos, width: i32, height: i32) -> Vec2 {
     Vec2::new(x, y) * TILE_SIZE
 }
 
-/// A coloured square filling `scale` of a grid square. Higher layers are drawn on top.
-fn square(colour: Color, scale: f32, centre: Vec2, layer: f32) -> (Sprite, Transform) {
+/// A picture filling `scale` of a grid square. Higher layers are drawn on top.
+fn picture(image: Handle<Image>, scale: f32, centre: Vec2, layer: f32) -> (Sprite, Transform) {
     (
-        Sprite::from_color(colour, Vec2::splat(TILE_SIZE * scale)),
-        Transform::from_translation(centre.extend(layer)),
-    )
-}
-
-/// Small text in the middle of a grid square.
-fn label(
-    text: &str,
-    colour: Color,
-    centre: Vec2,
-    layer: f32,
-) -> (Text2d, TextFont, TextColor, Transform) {
-    (
-        Text2d::new(text),
-        TextFont::from_font_size(11.0),
-        TextColor(colour),
+        Sprite {
+            image,
+            custom_size: Some(Vec2::splat(TILE_SIZE * scale)),
+            ..default()
+        },
         Transform::from_translation(centre.extend(layer)),
     )
 }
@@ -114,13 +85,84 @@ pub fn caption(
     )
 }
 
+/// Makes a sprite glide to its square from where it was a moment ago.
+#[derive(Component)]
+pub struct Slide {
+    from: Vec2,
+    to: Vec2,
+    timer: Timer,
+}
+
+impl Slide {
+    fn new(from: Vec2, to: Vec2) -> Self {
+        Slide {
+            from,
+            to,
+            timer: Timer::from_seconds(SLIDE_SECONDS, TimerMode::Once),
+        }
+    }
+
+    /// Where the sprite is right now: quick at first, slowing as it arrives.
+    fn position(&self) -> Vec2 {
+        let left = 1.0 - self.timer.fraction();
+        let eased = 1.0 - left * left;
+        self.from.lerp(self.to, eased)
+    }
+}
+
+/// Moves every sliding sprite a little further along, each frame.
+pub fn slide(time: Res<Time>, mut sliding: Query<(&mut Slide, &mut Transform)>) {
+    for (mut slide, mut transform) in &mut sliding {
+        slide.timer.tick(time.delta());
+        let position = slide.position();
+        transform.translation.x = position.x;
+        transform.translation.y = position.y;
+    }
+}
+
+/// The square the item now on `pos` was pushed from, if the change from
+/// `before` to `after` moved it there.
+fn item_origin(before: &Board, after: &Board, pos: Pos) -> Option<Pos> {
+    if before.item(pos) == after.item(pos) {
+        // Same item as before: it never moved.
+        return None;
+    }
+    // It came from a neighbouring square whose item is gone or different now.
+    [Dir::Up, Dir::Down, Dir::Left, Dir::Right]
+        .into_iter()
+        .map(|dir| pos.step(dir))
+        .find(|&near| before.item(near).is_some() && before.item(near) != after.item(near))
+}
+
+/// Draws something that can move. It belongs on `to`; if it was on `from` a
+/// moment ago, it starts there and slides over.
+fn spawn_piece(
+    commands: &mut Commands,
+    image: Handle<Image>,
+    scale: f32,
+    layer: f32,
+    from: Option<Vec2>,
+    to: Vec2,
+) {
+    match from {
+        Some(from) => commands.spawn((
+            Drawn,
+            picture(image, scale, from, layer),
+            Slide::new(from, to),
+        )),
+        None => commands.spawn((Drawn, picture(image, scale, to, layer))),
+    };
+}
+
 pub fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
 /// Throws away the old picture and draws the current board from scratch.
+/// Whatever the latest change moved starts on its old square and slides over.
 pub fn draw_board(
     mut commands: Commands,
+    assets: Res<AssetServer>,
     session: Res<Session>,
     selected: Res<Selected>,
     drawn: Query<Entity, With<Drawn>>,
@@ -129,38 +171,37 @@ pub fn draw_board(
 
     let board = session.board();
     let (width, height) = (board.width(), board.height());
+    let centre = |pos: Pos| square_centre(pos, width, height);
 
     for y in 0..height {
         for x in 0..width {
             let pos = Pos::new(x, y);
-            let centre = square_centre(pos, width, height);
-
             let tile = board.tile(pos);
-            commands.spawn((Drawn, square(tile_colour(tile), 0.96, centre, 0.0)));
-            match tile {
-                Tile::Station(station) => {
-                    commands.spawn((Drawn, label(station_name(station), LIGHT_TEXT, centre, 0.3)));
-                }
-                Tile::Hatch(dish) => {
-                    // A frame in the colour of the wanted dish, with a hole
-                    // the dish fits into exactly.
-                    commands.spawn((Drawn, square(item_colour(dish), 0.86, centre, 0.1)));
-                    commands.spawn((Drawn, square(tile_colour(tile), ITEM_SCALE, centre, 0.2)));
-                    commands.spawn((Drawn, label(item_name(dish), DARK_TEXT, centre, 0.3)));
-                }
-                Tile::Floor | Tile::Wall => {}
+            commands.spawn((Drawn, picture(assets.load(tile_sprite(tile)), 1.0, centre(pos), 0.0)));
+
+            if let Tile::Hatch(dish) = tile {
+                // A faint picture of the dish this hatch wants.
+                let (mut sprite, transform) =
+                    picture(assets.load(item_sprite(dish)), 0.8, centre(pos), 0.5);
+                sprite.color = Color::WHITE.with_alpha(0.35);
+                commands.spawn((Drawn, sprite, transform));
             }
         }
     }
 
+    let previous = session.previous();
+
     for (pos, item) in board.items() {
-        let centre = square_centre(pos, width, height);
-        commands.spawn((Drawn, square(item_colour(item), ITEM_SCALE, centre, 1.0)));
-        commands.spawn((Drawn, label(item_name(item), DARK_TEXT, centre, 1.1)));
+        let image = assets.load(item_sprite(item));
+        let from = previous
+            .and_then(|before| item_origin(before, board, pos))
+            .map(centre);
+        spawn_piece(&mut commands, image, 0.8, 1.0, from, centre(pos));
     }
 
-    let chef = square_centre(board.chef(), width, height);
-    commands.spawn((Drawn, square(CHEF, 0.5, chef, 2.0)));
+    let image = assets.load(CHEF_SPRITE);
+    let from = previous.map(|before| centre(before.chef()));
+    spawn_piece(&mut commands, image, 0.9, 2.0, from, centre(board.chef()));
 
     let (title, keys) = if board.is_solved() {
         ("Solved!", "Enter: next kitchen    Z: undo    Esc: menu")
@@ -177,7 +218,15 @@ pub fn draw_board(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+    use std::time::Duration;
+
     use super::*;
+    use crate::puzzle::parse;
+
+    fn board(text: &str) -> Board {
+        parse(text).expect("test level should parse")
+    }
 
     #[test]
     fn the_middle_square_is_at_the_origin() {
@@ -198,5 +247,92 @@ mod tests {
     fn an_even_board_is_centred_between_squares() {
         let half = TILE_SIZE / 2.0;
         assert_eq!(square_centre(Pos::new(0, 0), 2, 2), Vec2::new(-half, half));
+    }
+
+    #[test]
+    fn a_slide_starts_where_the_sprite_was() {
+        let slide = Slide::new(Vec2::ZERO, Vec2::new(64.0, 0.0));
+        assert_eq!(slide.position(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn a_slide_ends_on_the_sprites_square() {
+        let mut slide = Slide::new(Vec2::ZERO, Vec2::new(64.0, 0.0));
+        slide.timer.tick(Duration::from_secs_f32(SLIDE_SECONDS));
+        assert_eq!(slide.position(), Vec2::new(64.0, 0.0));
+    }
+
+    #[test]
+    fn a_slide_is_past_halfway_at_half_time() {
+        let mut slide = Slide::new(Vec2::ZERO, Vec2::new(64.0, 0.0));
+        slide.timer.tick(Duration::from_secs_f32(SLIDE_SECONDS / 2.0));
+        assert!(slide.position().x > 32.0);
+        assert!(slide.position().x < 64.0);
+    }
+
+    #[test]
+    fn a_pushed_item_comes_from_the_square_the_chef_took() {
+        let before = board("#@t.#");
+        let after = before.step(Dir::Right).unwrap();
+        assert_eq!(item_origin(&before, &after, Pos::new(3, 0)), Some(Pos::new(2, 0)));
+    }
+
+    #[test]
+    fn an_item_that_was_not_pushed_has_no_origin() {
+        let before = board("#b@t.#");
+        let after = before.step(Dir::Right).unwrap();
+        assert_eq!(item_origin(&before, &after, Pos::new(1, 0)), None);
+    }
+
+    #[test]
+    fn a_combined_item_comes_from_the_square_of_the_pushed_one() {
+        let before = board("#@bc#");
+        let after = before.step(Dir::Right).unwrap();
+        assert_eq!(item_origin(&before, &after, Pos::new(3, 0)), Some(Pos::new(2, 0)));
+    }
+
+    #[test]
+    fn undoing_a_push_slides_the_item_back() {
+        let after = board("#@t.#");
+        let before = after.step(Dir::Right).unwrap();
+        assert_eq!(item_origin(&before, &after, Pos::new(2, 0)), Some(Pos::new(3, 0)));
+    }
+
+    #[test]
+    fn undoing_a_combine_slides_only_the_pushed_item_back() {
+        let after = board("#@bc#");
+        let before = after.step(Dir::Right).unwrap();
+        // The bread goes back; the cheese reappears where the sandwich was.
+        assert_eq!(item_origin(&before, &after, Pos::new(2, 0)), Some(Pos::new(3, 0)));
+        assert_eq!(item_origin(&before, &after, Pos::new(3, 0)), None);
+    }
+
+    #[test]
+    fn every_picture_has_its_file() {
+        let items = [
+            Item::Tomato,
+            Item::ChoppedTomato,
+            Item::TomatoSoup,
+            Item::Bread,
+            Item::Cheese,
+            Item::Sandwich,
+            Item::Toastie,
+        ];
+        let tiles = [
+            Tile::Floor,
+            Tile::Wall,
+            Tile::Station(StationKind::ChoppingBoard),
+            Tile::Station(StationKind::Stove),
+            Tile::Hatch(Item::Tomato),
+        ];
+        let files = items
+            .map(item_sprite)
+            .into_iter()
+            .chain(tiles.map(tile_sprite))
+            .chain([CHEF_SPRITE]);
+        for file in files {
+            let path = Path::new("assets").join(file);
+            assert!(path.is_file(), "{} is missing", path.display());
+        }
     }
 }

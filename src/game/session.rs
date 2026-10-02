@@ -8,6 +8,9 @@ pub struct Session {
     board: Board,
     /// The board before each change, oldest first.
     history: Vec<Board>,
+    /// The board the latest step, undo or restart changed, or `None` if it
+    /// changed nothing. Lets the view show what moved.
+    previous: Option<Board>,
 }
 
 impl Session {
@@ -15,6 +18,7 @@ impl Session {
         Session {
             board,
             history: Vec::new(),
+            previous: None,
         }
     }
 
@@ -22,8 +26,13 @@ impl Session {
         &self.board
     }
 
+    pub fn previous(&self) -> Option<&Board> {
+        self.previous.as_ref()
+    }
+
     /// Moves the chef one square in `dir`, if the puzzle rules allow it.
     pub fn step(&mut self, dir: Dir) {
+        self.previous = None;
         if let Some(next) = self.board.step(dir) {
             self.change_to(next);
         }
@@ -31,13 +40,16 @@ impl Session {
 
     /// Takes back the latest change.
     pub fn undo(&mut self) {
-        if let Some(previous) = self.history.pop() {
-            self.board = previous;
+        self.previous = None;
+        if let Some(earlier) = self.history.pop() {
+            let undone = std::mem::replace(&mut self.board, earlier);
+            self.previous = Some(undone);
         }
     }
 
     /// Goes back to the starting board. Counts as a change, so it can be undone too.
     pub fn restart(&mut self) {
+        self.previous = None;
         // The oldest board in the history is the one the level started with.
         // No history means we are still on it.
         if let Some(start) = self.history.first().cloned() {
@@ -47,8 +59,9 @@ impl Session {
 
     /// Makes `next` the current board and remembers the one it replaces.
     fn change_to(&mut self, next: Board) {
-        let previous = std::mem::replace(&mut self.board, next);
-        self.history.push(previous);
+        let replaced = std::mem::replace(&mut self.board, next);
+        self.previous = Some(replaced.clone());
+        self.history.push(replaced);
     }
 }
 
@@ -111,6 +124,52 @@ mod tests {
         session.step(Dir::Right);
         session.restart();
         assert_eq!(session.board(), &board("#@..#"));
+    }
+
+    #[test]
+    fn a_new_session_has_no_previous_board() {
+        assert_eq!(session("#@..#").previous(), None);
+    }
+
+    #[test]
+    fn a_move_remembers_the_board_before_it() {
+        let mut session = session("#@..#");
+        session.step(Dir::Right);
+        assert_eq!(session.previous(), Some(&board("#@..#")));
+    }
+
+    #[test]
+    fn an_illegal_move_has_no_previous_board() {
+        let mut session = session("#@..#");
+        session.step(Dir::Right);
+        session.step(Dir::Up);
+        assert_eq!(session.previous(), None);
+    }
+
+    #[test]
+    fn undo_remembers_the_board_it_took_back() {
+        let mut session = session("#@..#");
+        session.step(Dir::Right);
+        session.undo();
+        assert_eq!(session.previous(), Some(&board("#.@.#")));
+    }
+
+    #[test]
+    fn undo_with_nothing_to_undo_has_no_previous_board() {
+        let mut session = session("#@..#");
+        session.step(Dir::Right);
+        session.undo();
+        session.undo();
+        assert_eq!(session.previous(), None);
+    }
+
+    #[test]
+    fn restart_remembers_the_board_it_left() {
+        let mut session = session("#@..#");
+        session.step(Dir::Right);
+        session.step(Dir::Right);
+        session.restart();
+        assert_eq!(session.previous(), Some(&board("#..@#")));
     }
 
     #[test]

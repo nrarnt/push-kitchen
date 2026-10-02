@@ -75,9 +75,20 @@ push-kitchen/
       progress.rs         which kitchens are solved, saved to a file
       session.rs          Resource: current Board + undo history (Vec<Board>)
       input.rs            keys while playing -> move / undo / restart / next / menu
-      view.rs             draws the Board, move animation
+      view.rs             draws the Board with sprites, slides what moved
+      sound.rs            which sound a move makes, and playing it
       ui.rs               level select menu
+  assets/sprites/*.png    one picture per tile, item and the chef
+  assets/sounds/*.wav     one file per sound effect
+  tools/make_sprites.py   draws the sprites (Python + Pillow)
+  tools/make_sounds.py    synthesises the sounds (plain Python)
 ```
+
+The sprites and sounds are original, made by the two scripts in `tools/`. To use other art or sounds (a Kenney pack, say), replace a file in `assets/` with one of the same name; no code changes.
+
+Sliding: the board does not track which item is which, so `Session` keeps the board from before the latest change and the view compares the two to see what moved. Anything that moved is drawn on its old square and slides to the new one in 0.12 s.
+
+`cargo run` finds `assets/` in the project folder. A binary started any other way looks for `assets/` next to itself, which milestone 7's release build has to provide.
 
 There is no separate "solved" state: a solved kitchen stays on screen in `Playing`, shows "Solved!", and Enter moves on to the next one.
 
