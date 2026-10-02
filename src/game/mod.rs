@@ -2,6 +2,7 @@
 //! taps and swipes.
 
 mod input;
+mod layout;
 mod levels;
 mod pointer;
 mod progress;
@@ -13,6 +14,7 @@ mod view;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 
+use layout::ViewSize;
 use levels::LEVELS;
 use pointer::{Gesture, TouchMode};
 use progress::Progress;
@@ -103,6 +105,7 @@ impl Plugin for GamePlugin {
         app.init_state::<Screen>()
             .add_message::<Gesture>()
             .init_resource::<TouchMode>()
+            .init_resource::<ViewSize>()
             .insert_resource(ClearColor(view::BACKGROUND))
             .insert_resource(Selected(first_unsolved(&progress)))
             .insert_resource(progress)
@@ -113,17 +116,19 @@ impl Plugin for GamePlugin {
             .add_systems(
                 Update,
                 (
-                    // First of all, so that this frame's taps and swipes
-                    // reach the screen that is showing.
-                    pointer::read_pointer,
+                    // First of all, so that the screens see this frame's
+                    // window size, taps and swipes.
+                    (layout::track_window, pointer::read_pointer),
                     (
                         (
                             ui::handle_menu_input,
-                            // Redrawn when the selection moves, and when
-                            // touch mode switches the Play button on.
+                            // Redrawn when the selection moves, when touch
+                            // mode switches the Play button on, and when
+                            // the window changes size.
                             ui::draw_menu.run_if(
                                 resource_changed::<Selected>
-                                    .or_eager(resource_changed::<TouchMode>),
+                                    .or_eager(resource_changed::<TouchMode>)
+                                    .or_eager(resource_changed::<ViewSize>),
                             ),
                         )
                             .chain()
@@ -134,7 +139,8 @@ impl Plugin for GamePlugin {
                             record_solved.run_if(resource_exists_and_changed::<Session>),
                             view::draw_board.run_if(
                                 resource_exists_and_changed::<Session>
-                                    .or_eager(resource_changed::<TouchMode>),
+                                    .or_eager(resource_changed::<TouchMode>)
+                                    .or_eager(resource_changed::<ViewSize>),
                             ),
                             view::slide,
                         )
@@ -363,10 +369,57 @@ mod tests {
         assert_eq!(chef, Pos::new(start.x, start.y + 1));
     }
 
+    /// Pretends the game is running on a phone held upright.
+    fn hold_a_phone(app: &mut App) {
+        app.world_mut().resource_mut::<ViewSize>().0 = Vec2::new(430.0, 900.0);
+    }
+
+    #[test]
+    fn on_a_tall_screen_a_swipe_moves_the_chef_the_way_it_looks() {
+        let mut app = headless_game(scratch_slot("turned-swipe"));
+        hold_a_phone(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        let start = LEVELS[0].board().chef();
+
+        // The first kitchen is wider than tall, so the phone shows it turned:
+        // down the screen is along a row of the kitchen.
+        gesture(&mut app, Gesture::Swipe(crate::puzzle::Dir::Down));
+        app.update();
+
+        let chef = app.world().resource::<Session>().board().chef();
+        assert_eq!(chef, Pos::new(start.x + 1, start.y));
+    }
+
+    #[test]
+    fn on_a_tall_screen_the_arrow_keys_follow_the_screen_too() {
+        let mut app = headless_game(scratch_slot("turned-keys"));
+        hold_a_phone(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        let start = LEVELS[0].board().chef();
+
+        tap(&mut app, KeyCode::ArrowDown);
+
+        let chef = app.world().resource::<Session>().board().chef();
+        assert_eq!(chef, Pos::new(start.x + 1, start.y));
+    }
+
+    #[test]
+    fn resizing_the_window_does_not_replay_the_last_slide() {
+        let mut app = headless_game(scratch_slot("resize-slide"));
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::ArrowDown);
+        assert_eq!(count::<view::Slide>(&mut app), 1);
+
+        hold_a_phone(&mut app);
+        app.update();
+        assert_eq!(count::<view::Slide>(&mut app), 0);
+    }
+
     #[test]
     fn tapping_a_level_in_the_menu_selects_it() {
         let mut app = headless_game(scratch_slot("tap-level"));
-        gesture(&mut app, Gesture::Tap(Vec2::new(0.0, ui::line_y(3))));
+        let menu = layout::MenuLayout::new(ViewSize::default().0, LEVELS.len());
+        gesture(&mut app, Gesture::Tap(Vec2::new(0.0, menu.line_y(3))));
         app.update();
 
         assert_eq!(selected(&app), 3);

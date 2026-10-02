@@ -20,21 +20,11 @@
       -webkit-user-select: none;
       -webkit-touch-callout: none;
     }
-    body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    /* The game's view is 800 x 720. This box is the biggest one of that
-       shape that fits the window, and the game fills it. "dvh" is the
-       height that is really visible on a phone, where the address bar
-       comes and goes; browsers that do not know it keep the "vh" lines. */
+    /* The game fills the whole window and lays itself out to fit, whatever
+       the window's shape. */
     #stage {
-      position: relative;
-      width: min(100vw, 100vh * 800 / 720);
-      height: min(100vh, 100vw * 720 / 800);
-      width: min(100vw, 100dvh * 800 / 720);
-      height: min(100dvh, 100vw * 720 / 800);
+      position: fixed;
+      inset: 0;
     }
     #game {
       display: block;

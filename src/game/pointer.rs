@@ -33,16 +33,13 @@ pub struct TouchMode(pub bool);
 pub struct Button {
     pub label: &'static str,
     pub centre: Vec2,
+    pub size: Vec2,
 }
 
 impl Button {
-    /// Every button has the same size: big enough for a thumb on a phone,
-    /// where the whole view is shown at about half size.
-    pub const SIZE: Vec2 = Vec2::new(230.0, 84.0);
-
     pub fn contains(&self, at: Vec2) -> bool {
         let from_centre = (at - self.centre).abs();
-        let half = Button::SIZE / 2.0;
+        let half = self.size / 2.0;
         from_centre.x <= half.x && from_centre.y <= half.y
     }
 }
@@ -178,18 +175,24 @@ mod tests {
         assert_eq!(swipe(START, START + Vec2::new(-15.0, -45.0)), Some(Dir::Up));
     }
 
+    const BUTTON: Button = Button {
+        label: "Go",
+        centre: Vec2::new(10.0, -20.0),
+        size: Vec2::new(120.0, 50.0),
+    };
+
     #[test]
     fn a_button_contains_its_centre_and_edges() {
-        let button = Button { label: "Go", centre: Vec2::new(10.0, -20.0) };
+        let button = BUTTON;
         assert!(button.contains(button.centre));
-        assert!(button.contains(button.centre + Button::SIZE / 2.0));
-        assert!(button.contains(button.centre - Button::SIZE / 2.0));
+        assert!(button.contains(button.centre + button.size / 2.0));
+        assert!(button.contains(button.centre - button.size / 2.0));
     }
 
     #[test]
     fn a_button_does_not_contain_points_beside_it() {
-        let button = Button { label: "Go", centre: Vec2::new(10.0, -20.0) };
-        let half = Button::SIZE / 2.0;
+        let button = BUTTON;
+        let half = button.size / 2.0;
         assert!(!button.contains(button.centre + Vec2::new(half.x + 1.0, 0.0)));
         assert!(!button.contains(button.centre - Vec2::new(0.0, half.y + 1.0)));
     }

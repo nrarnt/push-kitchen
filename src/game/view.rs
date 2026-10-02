@@ -1,19 +1,13 @@
-use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 
 use super::Selected;
 use super::input;
+use super::layout::{BoardLayout, ViewSize};
 use super::levels::LEVELS;
 use super::pointer::{Button, TouchMode};
 use super::session::Session;
 use crate::puzzle::{Board, Dir, Item, Pos, StationKind, Tile};
 
-/// Side of one grid square, in pixels.
-const TILE_SIZE: f32 = 64.0;
-/// The part of the scene that is always in view, whatever the shape of the
-/// window or web page. A bigger window shows it larger.
-pub const VIEW_WIDTH: f32 = 800.0;
-pub const VIEW_HEIGHT: f32 = 720.0;
 /// How long a sprite takes to slide one square.
 const SLIDE_SECONDS: f32 = 0.12;
 
@@ -97,20 +91,12 @@ pub fn clear(commands: &mut Commands, drawn: &Query<Entity, With<Drawn>>) {
     }
 }
 
-/// Where the middle of a grid square goes on screen, for a board of the given
-/// size centred on the origin. Bevy's `y` grows upwards, the grid's downwards.
-fn square_centre(pos: Pos, width: i32, height: i32) -> Vec2 {
-    let x = pos.x as f32 - (width - 1) as f32 / 2.0;
-    let y = (height - 1) as f32 / 2.0 - pos.y as f32;
-    Vec2::new(x, y) * TILE_SIZE
-}
-
-/// A picture filling `scale` of a grid square. Higher layers are drawn on top.
-fn picture(image: Handle<Image>, scale: f32, centre: Vec2, layer: f32) -> (Sprite, Transform) {
+/// A square picture `size` pixels wide. Higher layers are drawn on top.
+fn picture(image: Handle<Image>, size: f32, centre: Vec2, layer: f32) -> (Sprite, Transform) {
     (
         Sprite {
             image,
-            custom_size: Some(Vec2::splat(TILE_SIZE * scale)),
+            custom_size: Some(Vec2::splat(size)),
             ..default()
         },
         Transform::from_translation(centre.extend(layer)),
@@ -136,13 +122,13 @@ pub fn caption(
 pub fn spawn_button(commands: &mut Commands, button: Button) {
     commands.spawn((
         Drawn,
-        Sprite::from_color(BUTTON, Button::SIZE),
+        Sprite::from_color(BUTTON, button.size),
         Transform::from_translation(button.centre.extend(3.0)),
     ));
     commands.spawn((
         Drawn,
         Text2d::new(button.label),
-        TextFont::from_font_size(32.0),
+        TextFont::from_font_size(22.0),
         TextColor(LIGHT_TEXT),
         Transform::from_translation(button.centre.extend(3.1)),
     ));
@@ -157,9 +143,10 @@ pub struct Slide {
 }
 
 impl Slide {
-    fn new(from: Vec2, to: Vec2) -> Self {
+    /// `tile` is the side of one square, in pixels.
+    fn new(from: Vec2, to: Vec2, tile: f32) -> Self {
         // A longer way takes longer, so everything slides at the same speed.
-        let squares = (from.distance(to) / TILE_SIZE).max(1.0);
+        let squares = (from.distance(to) / tile).max(1.0);
         Slide {
             from,
             to,
@@ -202,37 +189,32 @@ fn item_origin(before: &Board, after: &Board, pos: Pos) -> Option<Pos> {
         .min_by_key(|from| (from.x - pos.x).abs() + (from.y - pos.y).abs())
 }
 
-/// Draws something that can move. It belongs on `to`; if it was on `from` a
-/// moment ago, it starts there and slides over.
+/// Draws something that can move, filling `scale` of a square `tile` pixels
+/// wide. It belongs on `to`; if it was on `from` a moment ago, it starts
+/// there and slides over.
 fn spawn_piece(
     commands: &mut Commands,
     image: Handle<Image>,
+    tile: f32,
     scale: f32,
     layer: f32,
     from: Option<Vec2>,
     to: Vec2,
 ) {
+    let size = tile * scale;
     match from {
         Some(from) => commands.spawn((
             Drawn,
-            picture(image, scale, from, layer),
-            Slide::new(from, to),
+            picture(image, size, from, layer),
+            Slide::new(from, to, tile),
         )),
-        None => commands.spawn((Drawn, picture(image, scale, to, layer))),
+        None => commands.spawn((Drawn, picture(image, size, to, layer))),
     };
 }
 
+/// The camera shows the window pixel for pixel, with (0, 0) in the middle.
 pub fn spawn_camera(mut commands: Commands) {
-    commands.spawn((
-        Camera2d,
-        Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::AutoMin {
-                min_width: VIEW_WIDTH,
-                min_height: VIEW_HEIGHT,
-            },
-            ..OrthographicProjection::default_2d()
-        }),
-    ));
+    commands.spawn(Camera2d);
 }
 
 /// Throws away the old picture and draws the current board from scratch.
@@ -243,57 +225,61 @@ pub fn draw_board(
     session: Res<Session>,
     selected: Res<Selected>,
     touch: Res<TouchMode>,
+    view: Res<ViewSize>,
     drawn: Query<Entity, With<Drawn>>,
 ) {
     clear(&mut commands, &drawn);
 
     let board = session.board();
-    let (width, height) = (board.width(), board.height());
-    let centre = |pos: Pos| square_centre(pos, width, height);
+    let layout = BoardLayout::new(view.0, board.width(), board.height());
+    let tile_size = layout.tile;
+    let centre = |pos: Pos| layout.square_centre(pos);
 
-    for y in 0..height {
-        for x in 0..width {
+    for y in 0..board.height() {
+        for x in 0..board.width() {
             let pos = Pos::new(x, y);
             let tile = board.tile(pos);
             let (sprite, mut transform) =
-                picture(assets.load(tile_sprite(tile)), 1.0, centre(pos), 0.0);
+                picture(assets.load(tile_sprite(tile)), tile_size, centre(pos), 0.0);
             if let Tile::Conveyor(dir) = tile {
-                transform.rotate_z(conveyor_turn(dir));
+                // The arrows point the way items go as seen on screen.
+                transform.rotate_z(conveyor_turn(layout.turn(dir)));
             }
             commands.spawn((Drawn, sprite, transform));
 
             if let Tile::Hatch(dish) = tile {
                 // A faint picture of the dish this hatch wants.
-                let (mut sprite, transform) =
-                    picture(assets.load(item_sprite(dish)), 0.8, centre(pos), 0.5);
+                let image = assets.load(item_sprite(dish));
+                let (mut sprite, transform) = picture(image, tile_size * 0.8, centre(pos), 0.5);
                 sprite.color = Color::WHITE.with_alpha(0.35);
                 commands.spawn((Drawn, sprite, transform));
             }
         }
     }
 
-    let previous = session.previous();
+    // Things slide only when the board itself has just changed, not when the
+    // picture is redrawn for another reason, such as a resized window.
+    let previous = if session.is_changed() { session.previous() } else { None };
 
     for (pos, item) in board.items() {
         let image = assets.load(item_sprite(item));
         let from = previous
             .and_then(|before| item_origin(before, board, pos))
             .map(centre);
-        spawn_piece(&mut commands, image, 0.8, 1.0, from, centre(pos));
+        spawn_piece(&mut commands, image, tile_size, 0.8, 1.0, from, centre(pos));
     }
 
     let image = assets.load(CHEF_SPRITE);
     let from = previous.map(|before| centre(before.chef()));
-    spawn_piece(&mut commands, image, 0.9, 2.0, from, centre(board.chef()));
+    spawn_piece(&mut commands, image, tile_size, 0.9, 2.0, from, centre(board.chef()));
 
     let solved = board.is_solved();
     let title = if solved { "Solved!" } else { LEVELS[selected.0].name };
-    let board_top = height as f32 * TILE_SIZE / 2.0;
-    commands.spawn((Drawn, caption(title, 40.0, LIGHT_TEXT, board_top + 40.0)));
+    commands.spawn((Drawn, caption(title, 30.0, LIGHT_TEXT, layout.title_y())));
 
     // Under the board: buttons for fingers, or a reminder of the keys.
     if touch.0 {
-        for button in input::buttons(solved) {
+        for button in input::buttons(solved, &layout) {
             spawn_button(&mut commands, button);
         }
     } else {
@@ -302,7 +288,9 @@ pub fn draw_board(
         } else {
             "Arrows or WASD: move    Z: undo    R: restart    Esc: menu"
         };
-        commands.spawn((Drawn, caption(keys, 20.0, DIM_TEXT, -board_top - 30.0)));
+        // Smaller in a narrow window, so the whole line stays in view.
+        let font_size = (view.0.x / 36.0).min(18.0);
+        commands.spawn((Drawn, caption(keys, font_size, DIM_TEXT, layout.controls_y())));
     }
 }
 
@@ -318,43 +306,25 @@ mod tests {
         parse(text).expect("test level should parse")
     }
 
-    #[test]
-    fn the_middle_square_is_at_the_origin() {
-        assert_eq!(square_centre(Pos::new(1, 1), 3, 3), Vec2::ZERO);
-    }
-
-    #[test]
-    fn grid_x_grows_to_the_right() {
-        assert_eq!(square_centre(Pos::new(2, 1), 3, 3), Vec2::new(TILE_SIZE, 0.0));
-    }
-
-    #[test]
-    fn the_first_row_is_at_the_top() {
-        assert_eq!(square_centre(Pos::new(1, 0), 3, 3), Vec2::new(0.0, TILE_SIZE));
-    }
-
-    #[test]
-    fn an_even_board_is_centred_between_squares() {
-        let half = TILE_SIZE / 2.0;
-        assert_eq!(square_centre(Pos::new(0, 0), 2, 2), Vec2::new(-half, half));
-    }
+    /// The side of a square in these tests.
+    const TILE: f32 = 64.0;
 
     #[test]
     fn a_slide_starts_where_the_sprite_was() {
-        let slide = Slide::new(Vec2::ZERO, Vec2::new(64.0, 0.0));
+        let slide = Slide::new(Vec2::ZERO, Vec2::new(TILE, 0.0), TILE);
         assert_eq!(slide.position(), Vec2::ZERO);
     }
 
     #[test]
     fn a_slide_ends_on_the_sprites_square() {
-        let mut slide = Slide::new(Vec2::ZERO, Vec2::new(64.0, 0.0));
+        let mut slide = Slide::new(Vec2::ZERO, Vec2::new(TILE, 0.0), TILE);
         slide.timer.tick(Duration::from_secs_f32(SLIDE_SECONDS));
         assert_eq!(slide.position(), Vec2::new(64.0, 0.0));
     }
 
     #[test]
     fn a_slide_is_past_halfway_at_half_time() {
-        let mut slide = Slide::new(Vec2::ZERO, Vec2::new(64.0, 0.0));
+        let mut slide = Slide::new(Vec2::ZERO, Vec2::new(TILE, 0.0), TILE);
         slide.timer.tick(Duration::from_secs_f32(SLIDE_SECONDS / 2.0));
         assert!(slide.position().x > 32.0);
         assert!(slide.position().x < 64.0);
@@ -362,7 +332,7 @@ mod tests {
 
     #[test]
     fn a_slide_over_several_squares_takes_that_much_longer() {
-        let slide = Slide::new(Vec2::ZERO, Vec2::new(3.0 * TILE_SIZE, 0.0));
+        let slide = Slide::new(Vec2::ZERO, Vec2::new(3.0 * TILE, 0.0), TILE);
         assert_eq!(
             slide.timer.duration(),
             Duration::from_secs_f32(3.0 * SLIDE_SECONDS)
@@ -418,20 +388,6 @@ mod tests {
         for file in sprite_files() {
             let path = Path::new("assets").join(file);
             assert!(path.is_file(), "{} is missing", path.display());
-        }
-    }
-
-    #[test]
-    fn every_level_fits_in_the_view() {
-        // Room for the title above the board, and below it the touch
-        // buttons (which need more than the key help they replace).
-        let captions = 64.0 + 104.0;
-        for level in LEVELS {
-            let board = level.board();
-            let width = board.width() as f32 * TILE_SIZE;
-            let height = board.height() as f32 * TILE_SIZE + captions;
-            assert!(width <= VIEW_WIDTH, "{} is too wide", level.id);
-            assert!(height <= VIEW_HEIGHT, "{} is too tall", level.id);
         }
     }
 }

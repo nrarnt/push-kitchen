@@ -88,6 +88,7 @@ push-kitchen/
       session.rs          Resource: current Board + undo history (Vec<Board>)
       input.rs            keys, swipes and button taps while playing -> move / undo / restart / next / menu
       pointer.rs          fingers and the mouse -> taps and swipes (Gesture)
+      layout.rs           where things go on screen, worked out from the window size
       view.rs             draws the Board with sprites, slides what moved
       sound.rs            which sound a move makes, and playing it
       ui.rs               level select menu
@@ -111,12 +112,21 @@ Sliding: the board does not track which item is which, so `Session` keeps the bo
 
 What differs in a browser:
 
-- The game draws into the page's `<canvas id="game">`. The camera always shows an 800 x 720 view, scaled to fit, so every kitchen and the whole menu fit any window. Tests check that each level and the menu fit that view.
+- The game draws into the page's `<canvas id="game">`, which fills the whole window. See "Layout" for how it fits itself to the window's shape.
 - Assets are fetched over HTTP one by one, so they are preloaded by name (a browser cannot list a folder).
 - Progress goes to `localStorage` instead of a file (`SaveSlot` in `progress.rs`).
 - Browsers keep sound off until the first key press or click; `index.html` switches it on then.
 - On a phone it is played by touch (see below). The page stops the browser from scrolling or zooming when a finger drags across the game.
 - A browser stops drawing a page that is not visible, so the game stands still in a background tab and carries on when the tab is shown again.
+
+## Layout
+
+The camera shows the window pixel for pixel, and `layout.rs` works out where everything goes from the window's size. It is plain arithmetic, tested for a phone held upright, a phone on its side, a small phone and a desktop window.
+
+- **Kitchen:** squares are as big as fits between the kitchen's name above and the controls below, up to 96 pixels. The name, kitchen and controls are centred as one block.
+- **Turning:** if the kitchen's squares come out bigger with rows and columns swapped, it is drawn that way. So a wide kitchen fills a tall phone screen, and turns back when the phone is turned. Only the picture and the input know about this: arrow keys and swipes mean directions on screen, and conveyor arrows are drawn the way items travel on screen. The puzzle itself, the level files and the saved progress are the same on every device.
+- **Menu:** lines are 44 pixels apart when there is room, closer together when there is not.
+- **Resizing:** the window's size is tracked each frame, and a change redraws the current screen.
 
 ## Touch
 
@@ -124,9 +134,9 @@ What differs in a browser:
 
 - **In a kitchen:** a swipe anywhere moves the chef one square.
 - **Touch mode:** the first time the screen is touched, the game starts showing buttons for what a keyboard has keys for. Under a kitchen: Undo, Restart (Next once it is solved) and Menu, in place of the key help. In the menu: Play.
-- **In the menu:** tapping a kitchen selects it and Play starts it. A tap does not start a kitchen directly, because a phone shows the list at about half size and the lines are too close together to hit the right one every time. Swiping up or down moves the selection one line.
+- **In the menu:** tapping a kitchen selects it and Play starts it. A tap does not start a kitchen directly, so that a tap on the wrong line can be corrected before anything happens. Swiping up or down moves the selection one line.
 
-Buttons are 230 x 84 in the view, about 110 x 40 points on a phone. A test checks that every kitchen leaves room for them.
+Buttons are 56 pixels high and share the window's width, up to 200 pixels each.
 
 ## Keyboard input
 

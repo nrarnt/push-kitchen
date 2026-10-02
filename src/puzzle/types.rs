@@ -29,6 +29,19 @@ pub enum Dir {
     Right,
 }
 
+impl Dir {
+    /// The direction after swapping rows and columns: what went across now
+    /// goes down, and what went down now goes across.
+    pub fn transposed(self) -> Dir {
+        match self {
+            Dir::Up => Dir::Left,
+            Dir::Left => Dir::Up,
+            Dir::Down => Dir::Right,
+            Dir::Right => Dir::Down,
+        }
+    }
+}
+
 /// What the floor is made of at one square.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tile {
@@ -81,6 +94,14 @@ impl Item {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transposing_swaps_across_and_down() {
+        assert_eq!(Dir::Right.transposed(), Dir::Down);
+        assert_eq!(Dir::Down.transposed(), Dir::Right);
+        assert_eq!(Dir::Left.transposed(), Dir::Up);
+        assert_eq!(Dir::Up.transposed(), Dir::Left);
+    }
 
     #[test]
     fn step_up_decreases_y() {
