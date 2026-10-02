@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Push Kitchen</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #1a1a21;
+      color: #e8e8ee;
+      font-family: system-ui, sans-serif;
+      /* On a phone, a finger dragged across the page belongs to the game:
+         no scrolling, no pull-to-refresh, no zooming, no text selection. */
+      touch-action: none;
+      overscroll-behavior: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    /* The game fills the whole window and lays itself out to fit, whatever
+       the window's shape. */
+    #stage {
+      position: fixed;
+      inset: 0;
+    }
+    #game {
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+      touch-action: none;
+    }
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      font-size: 1.25rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" tabindex="0"></canvas>
+    <p id="loading">Setting up the kitchen…</p>
+  </div>
+
+  <script type="module">
+    import init from "./push-kitchen.js";
+
+    // Browsers keep sound switched off until the visitor presses a key,
+    // clicks or taps. The game opens its sound output before that, so
+    // remember every output it opens and switch them on at the first of those.
+    const outputs = [];
+    window.AudioContext = new Proxy(window.AudioContext, {
+      construct(target, args) {
+        const output = new target(...args);
+        outputs.push(output);
+        return output;
+      },
+    });
+    for (const event of ["keydown", "click", "pointerdown", "touchend"]) {
+      document.addEventListener(event, () => {
+        for (const output of outputs) {
+          if (output.state === "suspended") output.resume();
+        }
+      });
+    }
+
+    const canvas = document.getElementById("game");
+    const loading = document.getElementById("loading");
+
+    try {
+      await init();
+    } catch (error) {
+      // Bevy leaves its start-up code by throwing this on purpose. Anything
+      // else is a real problem.
+      if (!String(error).includes("Using exceptions for control flow")) {
+        loading.textContent = "The game could not start. This browser may not support WebGL 2.";
+        throw error;
+      }
+    }
+    loading.remove();
+
+    // The game only hears the keyboard while its canvas has the focus.
+    // Nothing else on the page needs it, so take it back whenever it is
+    // lost, for instance by a click beside the game.
+    canvas.focus();
+    canvas.addEventListener("blur", () => setTimeout(() => canvas.focus(), 0));
+  </script>
+</body>
+</html>
