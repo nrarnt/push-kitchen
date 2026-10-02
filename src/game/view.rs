@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use super::Selected;
-use super::input;
+use super::input::{self, Stage};
 use super::layout::{BoardLayout, ViewSize};
 use super::levels::LEVELS;
 use super::pointer::{Button, TouchMode};
@@ -17,6 +17,8 @@ pub const DIM_TEXT: Color = Color::srgb(0.60, 0.60, 0.66);
 const BUTTON: Color = Color::srgb(0.26, 0.29, 0.40);
 
 const CHEF_SPRITE: &str = "sprites/chef.png";
+/// The chef after stepping on something hot.
+const BURNT_CHEF_SPRITE: &str = "sprites/chef_burnt.png";
 
 /// The picture of a tile, as a file inside the `assets` folder.
 fn tile_sprite(tile: Tile) -> &'static str {
@@ -72,7 +74,7 @@ const TILE_KINDS: [Tile; 8] = [
 fn sprite_files() -> impl Iterator<Item = &'static str> {
     let items = Item::ALL.into_iter().map(item_sprite);
     let tiles = TILE_KINDS.into_iter().map(tile_sprite);
-    items.chain(tiles).chain([CHEF_SPRITE])
+    items.chain(tiles).chain([CHEF_SPRITE, BURNT_CHEF_SPRITE])
 }
 
 /// Starts loading every picture, and returns the handles that keep them loaded.
@@ -269,24 +271,30 @@ pub fn draw_board(
         spawn_piece(&mut commands, image, tile_size, 0.8, 1.0, from, centre(pos));
     }
 
-    let image = assets.load(CHEF_SPRITE);
+    let stage = Stage::of(board);
+
+    let chef = if stage == Stage::Burnt { BURNT_CHEF_SPRITE } else { CHEF_SPRITE };
+    let image = assets.load(chef);
     let from = previous.map(|before| centre(before.chef()));
     spawn_piece(&mut commands, image, tile_size, 0.9, 2.0, from, centre(board.chef()));
 
-    let solved = board.is_solved();
-    let title = if solved { "Solved!" } else { LEVELS[selected.0].name };
+    let title = match stage {
+        Stage::Cooking => LEVELS[selected.0].name,
+        Stage::Solved => "Solved!",
+        Stage::Burnt => "Burnt!",
+    };
     commands.spawn((Drawn, caption(title, 30.0, LIGHT_TEXT, layout.title_y())));
 
     // Under the board: buttons for fingers, or a reminder of the keys.
     if touch.0 {
-        for button in input::buttons(solved, &layout) {
+        for button in input::buttons(stage, &layout) {
             spawn_button(&mut commands, button);
         }
     } else {
-        let keys = if solved {
-            "Enter: next kitchen    Z: undo    Esc: menu"
-        } else {
-            "Arrows or WASD: move    Z: undo    R: restart    Esc: menu"
+        let keys = match stage {
+            Stage::Cooking => "Arrows or WASD: move    Z: undo    R: restart    Esc: menu",
+            Stage::Solved => "Enter: next kitchen    Z: undo    Esc: menu",
+            Stage::Burnt => "R: start again    Esc: menu",
         };
         // Smaller in a narrow window, so the whole line stays in view.
         let font_size = (view.0.x / 36.0).min(18.0);

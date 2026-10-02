@@ -15,10 +15,12 @@ pub enum Sfx {
     /// Walking into something that will not move.
     Bump,
     Solved,
+    /// The chef stepping onto something hot.
+    Burnt,
 }
 
 impl Sfx {
-    const ALL: [Sfx; 8] = [
+    const ALL: [Sfx; 9] = [
         Sfx::Step,
         Sfx::Push,
         Sfx::Chop,
@@ -27,6 +29,7 @@ impl Sfx {
         Sfx::Bin,
         Sfx::Bump,
         Sfx::Solved,
+        Sfx::Burnt,
     ];
 }
 
@@ -41,27 +44,34 @@ fn file(sfx: Sfx) -> &'static str {
         Sfx::Bin => "sounds/bin.wav",
         Sfx::Bump => "sounds/bump.wav",
         Sfx::Solved => "sounds/solved.wav",
+        Sfx::Burnt => "sounds/burnt.wav",
     }
 }
 
 /// The sound of the chef's move that turned `before` into `after`.
 pub fn sound_of_move(before: &Board, after: &Board) -> Sfx {
+    if after.is_burnt() {
+        return Sfx::Burnt;
+    }
     if after.is_solved() && !before.is_solved() {
         return Sfx::Solved;
     }
-    // Was there an item on the square the chef walked onto?
-    let Some(pushed) = before.item(after.chef()) else {
-        return Sfx::Step;
-    };
-    // Where did it end up? Look for an item that was not there before.
+    // The kinds of item that left their square, and an item that is
+    // somewhere it was not before.
+    let left: Vec<Item> = before
+        .items()
+        .filter(|&(pos, item)| after.item(pos) != Some(item))
+        .map(|(_, item)| item)
+        .collect();
     let landed = after
         .items()
         .find(|&(pos, item)| before.item(pos) != Some(item));
 
     match landed {
+        None if left.is_empty() => Sfx::Step,
         None => Sfx::Bin,
         Some(_) if after.items().count() < before.items().count() => Sfx::Combine,
-        Some((_, item)) if item == pushed => Sfx::Push,
+        Some((_, item)) if left.contains(&item) => Sfx::Push,
         // It changed on the way, so a station cooked it.
         Some((_, Item::ChoppedTomato)) => Sfx::Chop,
         Some(_) => Sfx::Sizzle,
@@ -115,6 +125,22 @@ mod tests {
     #[test]
     fn the_stove_sizzles() {
         assert_eq!(sound_of_right("#@d~#"), Sfx::Sizzle);
+    }
+
+    #[test]
+    fn a_dish_pushed_off_the_stove_is_a_push() {
+        // Cook the soup, walk round to stand above the stove, and push the
+        // soup down off it.
+        let before = [Dir::Right, Dir::Up, Dir::Right]
+            .into_iter()
+            .fold(parse("#...#\n#@d~#\n###.#").unwrap(), |board, dir| board.step(dir).unwrap());
+        let after = before.step(Dir::Down).expect("push should be allowed");
+        assert_eq!(sound_of_move(&before, &after), Sfx::Push);
+    }
+
+    #[test]
+    fn stepping_onto_the_stove_sounds_burnt() {
+        assert_eq!(sound_of_right("#@~#"), Sfx::Burnt);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use super::pointer::{Button, Gesture, TouchMode};
 use super::session::Session;
 use super::sound::{self, Sfx, sound_of_move};
 use super::{Screen, Selected};
-use crate::puzzle::Dir;
+use crate::puzzle::{Board, Dir};
 
 /// What the player asked for with a key press, a tap or a swipe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +20,27 @@ enum Command {
     /// On to the next kitchen. Only does something once this one is solved.
     Next,
     Menu,
+}
+
+/// How the kitchen on screen is doing, which decides what the player can ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    Cooking,
+    Solved,
+    /// The chef stepped on something hot. All that is left is to start again.
+    Burnt,
+}
+
+impl Stage {
+    pub fn of(board: &Board) -> Stage {
+        if board.is_burnt() {
+            Stage::Burnt
+        } else if board.is_solved() {
+            Stage::Solved
+        } else {
+            Stage::Cooking
+        }
+    }
 }
 
 /// The command a key stands for while playing, if any.
@@ -39,20 +60,28 @@ fn command(key: KeyCode) -> Option<Command> {
 }
 
 /// The buttons shown under the kitchen in touch mode, each with what it
-/// does. Once the kitchen is solved, "Restart" gives way to "Next".
-fn buttons_and_commands(solved: bool, layout: &BoardLayout) -> [(Button, Command); 3] {
-    let (label, middle) = if solved {
-        ("Next", Command::Next)
-    } else {
-        ("Restart", Command::Restart)
-    };
-    let [left, centre, right] = layout.buttons(["Undo", label, "Menu"]);
-    [(left, Command::Undo), (centre, middle), (right, Command::Menu)]
+/// does. Once the kitchen is solved, "Restart" gives way to "Next". In a
+/// burnt kitchen there is nothing to undo.
+fn buttons_and_commands(stage: Stage, layout: &BoardLayout) -> Vec<(Button, Command)> {
+    match stage {
+        Stage::Cooking => {
+            let [undo, restart, menu] = layout.buttons(["Undo", "Restart", "Menu"]);
+            vec![(undo, Command::Undo), (restart, Command::Restart), (menu, Command::Menu)]
+        }
+        Stage::Solved => {
+            let [undo, next, menu] = layout.buttons(["Undo", "Next", "Menu"]);
+            vec![(undo, Command::Undo), (next, Command::Next), (menu, Command::Menu)]
+        }
+        Stage::Burnt => {
+            let [restart, menu] = layout.buttons(["Restart", "Menu"]);
+            vec![(restart, Command::Restart), (menu, Command::Menu)]
+        }
+    }
 }
 
 /// The touch buttons to draw under the kitchen.
-pub fn buttons(solved: bool, layout: &BoardLayout) -> impl Iterator<Item = Button> {
-    buttons_and_commands(solved, layout)
+pub fn buttons(stage: Stage, layout: &BoardLayout) -> impl Iterator<Item = Button> {
+    buttons_and_commands(stage, layout)
         .into_iter()
         .map(|(button, _)| button)
 }
@@ -63,12 +92,12 @@ pub fn buttons(solved: bool, layout: &BoardLayout) -> impl Iterator<Item = Butto
 fn gesture_command(
     gesture: Gesture,
     buttons_shown: bool,
-    solved: bool,
+    stage: Stage,
     layout: &BoardLayout,
 ) -> Option<Command> {
     match gesture {
         Gesture::Swipe(dir) => Some(Command::Move(dir)),
-        Gesture::Tap(at) if buttons_shown => buttons_and_commands(solved, layout)
+        Gesture::Tap(at) if buttons_shown => buttons_and_commands(stage, layout)
             .into_iter()
             .find(|(button, _)| button.contains(at))
             .map(|(_, command)| command),
@@ -102,13 +131,13 @@ pub fn handle_input(
 ) {
     // Everything asked for since the last frame: by keyboard, then by touch.
     // Taps are judged against the buttons as they were drawn.
-    let solved = session.board().is_solved();
+    let stage = Stage::of(session.board());
     let layout = BoardLayout::new(view.0, session.board().width(), session.board().height());
     let mut asked: Vec<Command> = keys_pressed(&mut keys).filter_map(command).collect();
     asked.extend(
         gestures
             .read()
-            .filter_map(|gesture| gesture_command(*gesture, touch.0, solved, &layout)),
+            .filter_map(|gesture| gesture_command(*gesture, touch.0, stage, &layout)),
     );
 
     for command in asked {
@@ -142,6 +171,7 @@ pub fn handle_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::puzzle::parse;
 
     #[test]
     fn arrow_keys_move_the_chef() {
@@ -193,8 +223,8 @@ mod tests {
     }
 
     /// Where the button with this label is drawn.
-    fn button_centre(label: &str, solved: bool) -> Vec2 {
-        buttons(solved, &layout())
+    fn button_centre(label: &str, stage: Stage) -> Vec2 {
+        buttons(stage, &layout())
             .find(|button| button.label == label)
             .expect("there should be a button with that label")
             .centre
@@ -203,15 +233,15 @@ mod tests {
     #[test]
     fn a_swipe_moves_the_chef() {
         let swipe = Gesture::Swipe(Dir::Left);
-        let command = gesture_command(swipe, false, false, &layout());
+        let command = gesture_command(swipe, false, Stage::Cooking, &layout());
         assert_eq!(command, Some(Command::Move(Dir::Left)));
     }
 
     #[test]
     fn tapping_a_button_does_what_it_says() {
         let tapped = |label| {
-            let tap = Gesture::Tap(button_centre(label, false));
-            gesture_command(tap, true, false, &layout())
+            let tap = Gesture::Tap(button_centre(label, Stage::Cooking));
+            gesture_command(tap, true, Stage::Cooking, &layout())
         };
         assert_eq!(tapped("Undo"), Some(Command::Undo));
         assert_eq!(tapped("Restart"), Some(Command::Restart));
@@ -220,20 +250,42 @@ mod tests {
 
     #[test]
     fn a_solved_kitchen_offers_next_instead_of_restart() {
-        let tap = Gesture::Tap(button_centre("Next", true));
-        assert_eq!(gesture_command(tap, true, true, &layout()), Some(Command::Next));
+        let tap = Gesture::Tap(button_centre("Next", Stage::Solved));
+        assert_eq!(gesture_command(tap, true, Stage::Solved, &layout()), Some(Command::Next));
+    }
+
+    #[test]
+    fn a_burnt_kitchen_offers_only_restart_and_menu() {
+        let labels: Vec<&str> = buttons(Stage::Burnt, &layout()).map(|button| button.label).collect();
+        assert_eq!(labels, ["Restart", "Menu"]);
+    }
+
+    #[test]
+    fn tapping_restart_in_a_burnt_kitchen_restarts_it() {
+        let tap = Gesture::Tap(button_centre("Restart", Stage::Burnt));
+        assert_eq!(gesture_command(tap, true, Stage::Burnt, &layout()), Some(Command::Restart));
+    }
+
+    #[test]
+    fn the_stage_follows_the_board() {
+        let cooking = parse("#@tT#\n#~###").unwrap();
+        assert_eq!(Stage::of(&cooking), Stage::Cooking);
+        let solved = cooking.step(Dir::Right).unwrap();
+        assert_eq!(Stage::of(&solved), Stage::Solved);
+        let burnt = cooking.step(Dir::Down).unwrap();
+        assert_eq!(Stage::of(&burnt), Stage::Burnt);
     }
 
     #[test]
     fn a_tap_beside_the_buttons_does_nothing() {
         let tap = Gesture::Tap(Vec2::ZERO);
-        assert_eq!(gesture_command(tap, true, false, &layout()), None);
+        assert_eq!(gesture_command(tap, true, Stage::Cooking, &layout()), None);
     }
 
     #[test]
     fn buttons_that_are_not_shown_cannot_be_tapped() {
-        let tap = Gesture::Tap(button_centre("Undo", false));
-        assert_eq!(gesture_command(tap, false, false, &layout()), None);
+        let tap = Gesture::Tap(button_centre("Undo", Stage::Cooking));
+        assert_eq!(gesture_command(tap, false, Stage::Cooking, &layout()), None);
     }
 
     #[test]

@@ -221,26 +221,45 @@ def toastie():
     save(image, "toastie")
 
 
+def chef_shape(draw, skin, cheek, hat):
+    # Face.
+    draw.ellipse((126, 214, 386, 474), fill=skin, outline=INK, width=12)
+    circle(draw, 174, 392, 22, cheek)
+    circle(draw, 338, 392, 22, cheek)
+    # Hat: three puffs on a band.
+    circle(draw, 170, 150, 82, hat, INK, 12)
+    circle(draw, 342, 150, 82, hat, INK, 12)
+    circle(draw, 256, 118, 96, hat, INK, 12)
+    draw.rounded_rectangle((142, 176, 370, 262), radius=20, fill=hat, outline=INK, width=12)
+    draw.rectangle((160, 150, 352, 190), fill=hat)
+
+
 def chef():
     image, draw = canvas()
-    # Face.
-    draw.ellipse((126, 214, 386, 474), fill=SKIN, outline=INK, width=12)
+    chef_shape(draw, SKIN, (255, 170, 150, 255), WHITE)
     circle(draw, 206, 350, 16, INK)
     circle(draw, 306, 350, 16, INK)
-    circle(draw, 174, 392, 22, (255, 170, 150, 255))
-    circle(draw, 338, 392, 22, (255, 170, 150, 255))
     draw.arc((212, 360, 300, 430), start=20, end=160, fill=INK, width=12)
-    # Hat: three puffs on a band.
-    circle(draw, 170, 150, 82, WHITE, INK, 12)
-    circle(draw, 342, 150, 82, WHITE, INK, 12)
-    circle(draw, 256, 118, 96, WHITE, INK, 12)
-    draw.rounded_rectangle((142, 176, 370, 262), radius=20, fill=WHITE, outline=INK, width=12)
-    draw.rectangle((160, 150, 352, 190), fill=WHITE)
     save(image, "chef")
+
+
+def chef_burnt():
+    """The chef after stepping on something hot: sooty, with crosses for eyes."""
+    image, draw = canvas()
+    chef_shape(draw, (150, 122, 108, 255), (120, 92, 84, 255), (120, 118, 122, 255))
+    for x in (206, 306):
+        draw.line((x - 20, 330, x + 20, 370), fill=INK, width=12)
+        draw.line((x - 20, 370, x + 20, 330), fill=INK, width=12)
+    # A wobbly mouth, and smoke rising from the hat.
+    draw.arc((212, 400, 256, 440), start=180, end=360, fill=INK, width=12)
+    draw.arc((256, 400, 300, 440), start=0, end=180, fill=INK, width=12)
+    for x, y, r in ((200, 60, 26), (300, 40, 20), (256, 14, 14)):
+        circle(draw, x, y, r, (190, 190, 196, 200))
+    save(image, "chef_burnt")
 
 
 if __name__ == "__main__":
     for make in (floor, wall, chopping_board, stove, hatch, conveyor, ice, bin_,
-                 tomato, chopped_tomato, tomato_soup, bread, cheese, sandwich, toastie, chef):
+                 tomato, chopped_tomato, tomato_soup, bread, cheese, sandwich, toastie, chef, chef_burnt):
         make()
     print(f"sprites written to {OUT}")

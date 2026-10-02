@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::recipes::{combine, transform};
-use super::types::{Dir, Item, Pos, Tile};
+use super::types::{Dir, Item, Pos, StationKind, Tile};
 
 /// The whole state of one kitchen at one moment.
 #[derive(Debug, Clone, PartialEq)]
@@ -12,6 +12,8 @@ pub struct Board {
     tiles: Vec<Tile>,
     items: HashMap<Pos, Item>,
     chef: Pos,
+    /// True once the chef has stepped on something hot. Nothing moves after that.
+    burnt: bool,
 }
 
 impl Board {
@@ -28,6 +30,7 @@ impl Board {
             tiles,
             items,
             chef,
+            burnt: false,
         }
     }
 
@@ -41,6 +44,12 @@ impl Board {
 
     pub fn chef(&self) -> Pos {
         self.chef
+    }
+
+    /// True if the chef has stepped on a stove. The kitchen is lost: the
+    /// only way on is to start it again.
+    pub fn is_burnt(&self) -> bool {
+        self.burnt
     }
 
     /// The tile at `pos`. Anything outside the kitchen counts as wall.
@@ -67,16 +76,28 @@ impl Board {
     /// A move has three phases: the chef walks, the item in the way (if any)
     /// is shoved, and then the conveyors run.
     pub fn step(&self, dir: Dir) -> Option<Board> {
+        if self.burnt {
+            return None;
+        }
         let dest = self.chef.step(dir);
         if self.tile(dest) == Tile::Wall {
             return None;
         }
 
         let mut next = self.clone();
-        next.chef = dest;
-        // If the item in the way will not budge, neither does the chef.
-        if next.item(dest).is_some() && !next.shove(dest, dir) {
-            return None;
+        let stove = self.tile(dest) == Tile::Station(StationKind::Stove);
+        if next.item(dest).is_some() {
+            // If the item in the way will not budge, neither does the chef.
+            if !next.shove(dest, dir) {
+                return None;
+            }
+            // The chef reaches over a stove to push what is on it, and stays put.
+            if !stove {
+                next.chef = dest;
+            }
+        } else {
+            next.chef = dest;
+            next.burnt = stove;
         }
         next.run_conveyors();
         Some(next)
@@ -152,8 +173,12 @@ impl Board {
         }
     }
 
-    /// True when every hatch holds the dish it wants.
+    /// True when every hatch holds the dish it wants. A burnt kitchen is
+    /// never solved.
     pub fn is_solved(&self) -> bool {
+        if self.burnt {
+            return false;
+        }
         for y in 0..self.height {
             for x in 0..self.width {
                 let pos = Pos::new(x, y);
@@ -276,6 +301,65 @@ mod tests {
 
         let after = before.step(Dir::Right).expect("push should be allowed");
         assert_eq!(after.item(Pos::new(2, 0)), Some(Item::Toastie));
+    }
+
+    /// The board drawn by `text`, with `item` put on the square at `x` in
+    /// the first row. For items on stations, which a drawing cannot show.
+    fn board_with_item_at(text: &str, x: i32, item: Item) -> Board {
+        let mut board = board(text);
+        board.items.insert(Pos::new(x, 0), item);
+        board
+    }
+
+    #[test]
+    fn walking_onto_an_empty_stove_burns_the_chef() {
+        let after = pushed_right("#@~#");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert!(after.is_burnt());
+    }
+
+    #[test]
+    fn a_kitchen_does_not_start_burnt() {
+        assert!(!board("#@~#").is_burnt());
+    }
+
+    #[test]
+    fn a_burnt_chef_cannot_move() {
+        let burnt = pushed_right("#.@~#");
+        assert_eq!(burnt.step(Dir::Left), None);
+    }
+
+    #[test]
+    fn pushing_an_item_off_a_stove_leaves_the_chef_where_they_are() {
+        let before = board_with_item_at("#@~.#", 2, Item::TomatoSoup);
+        let after = before.step(Dir::Right).expect("push should be allowed");
+        assert_eq!(after.chef(), Pos::new(1, 0));
+        assert_eq!(after.item(Pos::new(2, 0)), None);
+        assert_eq!(after.item(Pos::new(3, 0)), Some(Item::TomatoSoup));
+        assert!(!after.is_burnt());
+    }
+
+    #[test]
+    fn an_item_stuck_on_a_stove_keeps_the_chef_off_it() {
+        let before = board_with_item_at("#@~#", 2, Item::TomatoSoup);
+        assert_eq!(before.step(Dir::Right), None);
+    }
+
+    #[test]
+    fn an_item_pushed_off_a_stove_slides_over_ice() {
+        let before = board_with_item_at("#@~**.#", 2, Item::TomatoSoup);
+        let after = before.step(Dir::Right).expect("push should be allowed");
+        assert_eq!(after.chef(), Pos::new(1, 0));
+        assert_eq!(after.item(Pos::new(5, 0)), Some(Item::TomatoSoup));
+    }
+
+    #[test]
+    fn a_burnt_kitchen_is_not_solved() {
+        // Every hatch is served, and then the chef walks onto the stove.
+        let served = pushed_right("#@tT#\n#~###");
+        assert!(served.is_solved());
+        let burnt = served.step(Dir::Left).and_then(|board| board.step(Dir::Down));
+        assert!(!burnt.expect("walking should be allowed").is_solved());
     }
 
     #[test]

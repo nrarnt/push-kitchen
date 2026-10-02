@@ -38,22 +38,30 @@ impl Session {
         }
     }
 
-    /// Takes back the latest change.
+    /// Takes back the latest change. A burnt kitchen cannot be taken back.
     pub fn undo(&mut self) {
         self.previous = None;
+        if self.board.is_burnt() {
+            return;
+        }
         if let Some(earlier) = self.history.pop() {
             let undone = std::mem::replace(&mut self.board, earlier);
             self.previous = Some(undone);
         }
     }
 
-    /// Goes back to the starting board. Counts as a change, so it can be undone too.
+    /// Goes back to the starting board. Counts as a change, so it can be
+    /// undone too, unless the kitchen was burnt: then it is a fresh start.
     pub fn restart(&mut self) {
         self.previous = None;
         // The oldest board in the history is the one the level started with.
         // No history means we are still on it.
         if let Some(start) = self.history.first().cloned() {
+            let burnt = self.board.is_burnt();
             self.change_to(start);
+            if burnt {
+                self.history.clear();
+            }
         }
     }
 
@@ -170,6 +178,38 @@ mod tests {
         session.step(Dir::Right);
         session.restart();
         assert_eq!(session.previous(), Some(&board("#..@#")));
+    }
+
+    /// A session whose chef has just walked onto the stove.
+    fn burnt_session() -> Session {
+        let mut session = session("#.@~#");
+        session.step(Dir::Left);
+        session.step(Dir::Right);
+        session.step(Dir::Right);
+        assert!(session.board().is_burnt());
+        session
+    }
+
+    #[test]
+    fn a_burnt_kitchen_cannot_be_undone() {
+        let mut session = burnt_session();
+        session.undo();
+        assert!(session.board().is_burnt());
+    }
+
+    #[test]
+    fn restart_brings_a_burnt_kitchen_back() {
+        let mut session = burnt_session();
+        session.restart();
+        assert_eq!(session.board(), &board("#.@~#"));
+    }
+
+    #[test]
+    fn a_restart_after_burning_cannot_be_undone() {
+        let mut session = burnt_session();
+        session.restart();
+        session.undo();
+        assert_eq!(session.board(), &board("#.@~#"));
     }
 
     #[test]

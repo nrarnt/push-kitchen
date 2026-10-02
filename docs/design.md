@@ -9,7 +9,7 @@ Decisions:
 | Topic | Decision |
 |---|---|
 | Players | Solo |
-| Pace | Calm and thinky: no timer, no fail state |
+| Pace | Calm and thinky: no timer. The chef can get burnt, which costs only a restart |
 | Puzzle style | Sokoban-style block pushing with routing through stations |
 | From Overcooked | Recipe steps, combining ingredients, quirky kitchens |
 | Core move | Push only (walk into an item to shove it one tile) |
@@ -25,7 +25,9 @@ Success = a small playable game she wants to pick up, and every line of it is un
 - **Stations:** special floor tiles. An ingredient landing on one is transformed (chopping board: tomato → chopped tomato; stove: raw → cooked). Items the station has no use for pass over unchanged.
 - **Combining:** pushing item A into item B merges them if a recipe exists (bread + cheese → sandwich); otherwise the push is blocked.
 - **Winning:** each hatch shows the dish it wants; solved when every hatch holds its dish.
-- **Safety nets:** unlimited undo (Z), restart (R).
+- **The stove is hot:** walking onto an empty stove burns the chef. To push a dish off a stove the chef reaches over: the dish moves one square and the chef stays put. If the dish cannot move, neither happens.
+- **Burnt:** the kitchen shows "Burnt!" and nothing moves any more. Undo does not help; the only way on is to restart the kitchen (or leave for the menu). A burnt kitchen never counts as solved.
+- **Safety nets:** unlimited undo (Z), restart (R). Restarting a burnt kitchen is a fresh start: the moves before it cannot be brought back.
 - **Twists:** conveyor belts, ice floors, bin (see below).
 
 ### Twists
@@ -63,7 +65,7 @@ One character per square.
 | `b` `c` `w` `g` | bread, cheese, sandwich, toastie (grilled) |
 | capital of an item letter | hatch that wants that item (`S` wants soup) |
 
-The chef can walk over stations and hatches. An item cannot start on a station or a hatch.
+The chef can walk over chopping boards and hatches, but not over a stove. An item cannot start on a station or a hatch.
 
 ## Architecture
 
@@ -86,7 +88,8 @@ push-kitchen/
       levels.rs           the list of kitchens, baked in with include_str!
       progress.rs         which kitchens are solved, saved to a file (or the browser's storage)
       session.rs          Resource: current Board + undo history (Vec<Board>)
-      input.rs            keys, swipes and button taps while playing -> move / undo / restart / next / menu
+      input.rs            keys, swipes and button taps while playing -> move / undo / restart / next / menu;
+                          Stage (cooking / solved / burnt) decides which of those are on offer
       pointer.rs          fingers and the mouse -> taps and swipes (Gesture)
       layout.rs           where things go on screen, worked out from the window size
       view.rs             draws the Board with sprites, slides what moved
@@ -133,10 +136,10 @@ The camera shows the window pixel for pixel, and `layout.rs` works out where eve
 `pointer.rs` watches fingers (and the mouse, which counts as one more finger) and reports two kinds of `Gesture`: a tap at a point in the view, or a swipe in a direction. A swipe is reported as soon as the finger has travelled 24 screen pixels, without waiting for it to lift, and once per touch. The screens read gestures the same way they read keys.
 
 - **In a kitchen:** a swipe anywhere moves the chef one square.
-- **Touch mode:** the first time the screen is touched, the game starts showing buttons for what a keyboard has keys for. Under a kitchen: Undo, Restart (Next once it is solved) and Menu, in place of the key help. In the menu: Play.
+- **Touch mode:** the first time the screen is touched, the game starts showing buttons for what a keyboard has keys for. Under a kitchen: Undo, Restart (Next once it is solved) and Menu, in place of the key help; in a burnt kitchen just Restart and Menu. In the menu: Play.
 - **In the menu:** tapping a kitchen selects it and Play starts it. A tap does not start a kitchen directly, so that a tap on the wrong line can be corrected before anything happens. Swiping up or down moves the selection one line.
 
-Buttons are 56 pixels high and share the window's width, up to 200 pixels each.
+Buttons are 56 pixels high and share the window's width, up to 200 pixels each. `BoardLayout::buttons` lays out any number of them in a centred row.
 
 ## Keyboard input
 
@@ -144,11 +147,11 @@ The game reads key presses one by one, in the order they happened (Bevy's `Keybo
 
 When the screen changes (menu to level, level to menu, level to next level), key presses, taps and swipes that have not been handled yet are thrown away, so one meant for the old screen is never acted on by the new one.
 
-There is no separate "solved" state: a solved kitchen stays on screen in `Playing`, shows "Solved!", and Enter moves on to the next one.
+There is no separate "solved" or "burnt" screen: the kitchen stays on screen in `Playing` and shows "Solved!" or "Burnt!". Enter moves on from a solved kitchen to the next one; R starts a burnt one again.
 
 Every kitchen can be played from the start; the menu marks the solved ones and opens on the first unsolved one. Progress is text with one level id per line. On a computer it is the file `~/Library/Application Support/Push Kitchen/progress.txt`; in a browser it is kept in the page's `localStorage`, so it belongs to that browser on that device.
 
-Key idea: `Board::step` is a pure function (old board + direction → new board, or `None` if the move is illegal). Undo is pushing/popping boards on a `Vec`. All rules are tested with `cargo test`, no window needed.
+Key idea: `Board::step` is a pure function (old board + direction → new board, or `None` if the move is illegal). A burnt board allows no move at all. Undo is pushing/popping boards on a `Vec`. All rules are tested with `cargo test`, no window needed.
 
 ## Build order
 
@@ -164,6 +167,7 @@ Each milestone ends with something runnable.
 | 5 | Look and feel | Real sprites, sliding movement, sounds | assets, `Time`, interpolation |
 | 6 | Twists | Conveyors, ice, bin | iterators, refactoring `step` into phases |
 | 7 | Content | 12 kitchens, playtesting, web build playable in a browser | WebAssembly, `cfg` for per-platform code, build profiles |
+| 8 | Burning | The stove burns the chef, who reaches over it to push; a burnt kitchen can only be restarted | a flag in the state, const generics (`buttons`), an enum for the kitchen's stage |
 
 ## Verification
 

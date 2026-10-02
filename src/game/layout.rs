@@ -112,18 +112,23 @@ impl BoardLayout {
         self.centre_y() - self.rows as f32 * self.tile / 2.0 - CONTROLS_BAND / 2.0
     }
 
-    /// Three buttons side by side under the kitchen, as wide as the window allows.
-    pub fn buttons(&self, labels: [&'static str; 3]) -> [Button; 3] {
-        // Three buttons and the four gaps around them share the width.
-        let width = ((self.view.x - 4.0 * BUTTON_GAP) / 3.0).min(BUTTON_MAX_WIDTH);
+    /// Buttons side by side under the kitchen, as wide as the window allows.
+    pub fn buttons<const N: usize>(&self, labels: [&'static str; N]) -> [Button; N] {
+        // The buttons and the gaps around them share the width.
+        let count = N as f32;
+        let width = ((self.view.x - (count + 1.0) * BUTTON_GAP) / count).min(BUTTON_MAX_WIDTH);
         let step = width + BUTTON_GAP;
-        let button = |label, x| Button {
-            label,
-            centre: Vec2::new(x, self.controls_y()),
-            size: Vec2::new(width, BUTTON_HEIGHT),
-        };
-        let [left, middle, right] = labels;
-        [button(left, -step), button(middle, 0.0), button(right, step)]
+        let mut place = 0.0;
+        labels.map(|label| {
+            // Counted from the middle of the row.
+            let x = (place - (count - 1.0) / 2.0) * step;
+            place += 1.0;
+            Button {
+                label,
+                centre: Vec2::new(x, self.controls_y()),
+                size: Vec2::new(width, BUTTON_HEIGHT),
+            }
+        })
     }
 }
 
@@ -286,6 +291,13 @@ mod tests {
                 assert!(button.centre.x.abs() + button.size.x / 2.0 <= view.x / 2.0, "on {view}");
             }
         }
+    }
+
+    #[test]
+    fn two_buttons_are_centred_under_the_kitchen() {
+        let [left, right] = BoardLayout::new(PHONE, 9, 6).buttons(["A", "B"]);
+        assert_eq!(left.centre.x, -right.centre.x);
+        assert!(left.centre.x + left.size.x / 2.0 <= right.centre.x - right.size.x / 2.0);
     }
 
     #[test]

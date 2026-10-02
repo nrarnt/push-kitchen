@@ -96,4 +96,7 @@ if __name__ == "__main__":
     # Last, so that adding it left the noise in the files above unchanged.
     save("bin", mix(sweep(260, 70, 0.2, 0.4, decay=4.0), noise(0.2, 0.12, decay=6.0, smooth=0.6)))
 
+    # A long hiss over a falling tone: the chef on the stove.
+    save("burnt", mix(noise(0.7, 0.3, decay=3.0, smooth=0.1), sweep(420, 90, 0.5, 0.3, decay=3.0)))
+
     print(f"sounds written to {OUT}")
