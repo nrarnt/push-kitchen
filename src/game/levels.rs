@@ -78,6 +78,71 @@ pub const LEVELS: &[Level] = &[
         name: "Dinner service",
         text: include_str!("../../assets/levels/dinner_service.txt"),
     },
+    Level {
+        id: "hot-plate",
+        name: "Hot plate",
+        text: include_str!("../../assets/levels/hot_plate.txt"),
+    },
+    Level {
+        id: "melt",
+        name: "Melt",
+        text: include_str!("../../assets/levels/melt.txt"),
+    },
+    Level {
+        id: "pantry",
+        name: "Pantry",
+        text: include_str!("../../assets/levels/pantry.txt"),
+    },
+    Level {
+        id: "thin-ice",
+        name: "Thin ice",
+        text: include_str!("../../assets/levels/thin_ice.txt"),
+    },
+    Level {
+        id: "oil-spill",
+        name: "Oil spill",
+        text: include_str!("../../assets/levels/oil_spill.txt"),
+    },
+    Level {
+        id: "leap-of-faith",
+        name: "Leap of faith",
+        text: include_str!("../../assets/levels/leap_of_faith.txt"),
+    },
+    Level {
+        id: "mouse-in-the-house",
+        name: "A mouse in the house",
+        text: include_str!("../../assets/levels/mouse_in_the_house.txt"),
+    },
+    Level {
+        id: "pest-control",
+        name: "Pest control",
+        text: include_str!("../../assets/levels/pest_control.txt"),
+    },
+    Level {
+        id: "grease-lightning",
+        name: "Grease lightning",
+        text: include_str!("../../assets/levels/grease_lightning.txt"),
+    },
+    Level {
+        id: "escort",
+        name: "Escort",
+        text: include_str!("../../assets/levels/escort.txt"),
+    },
+    Level {
+        id: "quick-service",
+        name: "Quick service",
+        text: include_str!("../../assets/levels/quick_service.txt"),
+    },
+    Level {
+        id: "out-of-step",
+        name: "Out of step",
+        text: include_str!("../../assets/levels/out_of_step.txt"),
+    },
+    Level {
+        id: "full-house",
+        name: "Full house",
+        text: include_str!("../../assets/levels/full_house.txt"),
+    },
 ];
 
 #[cfg(test)]
@@ -177,7 +242,7 @@ mod tests {
             let moves = fewest_moves(level.board());
             assert!(moves.is_some(), "{} cannot be solved", level.id);
             // Shown with --nocapture: a rough measure of how hard each level is.
-            println!("{:16} {:3} moves", level.id, moves.unwrap());
+            println!("{:20} {:3} moves", level.id, moves.unwrap());
         }
     }
 }

@@ -1,6 +1,8 @@
 # Push Kitchen
 
-A calm kitchen puzzle game. Push ingredients over chopping boards and stoves, combine them, and serve each hatch the dish it wants. There is no timer and every move can be undone, with one exception: step on the hot stove and the chef is burnt, and the kitchen has to be started again.
+A calm kitchen puzzle game. Push ingredients over chopping boards and stoves, combine them, and serve each hatch the dish it wants. There is no timer and every move can be undone, with one exception: step on the hot stove or into a flame and the chef is burnt, and the kitchen has to be started again.
+
+There are 25 kitchens. The later ones have walls inside, flames, grease that sends the chef sliding, and mice that eat whatever food they reach.
 
 **Play it in your browser: https://nrarnt.github.io/push-kitchen/**
 

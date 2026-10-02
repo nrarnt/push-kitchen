@@ -133,7 +133,9 @@ impl BoardLayout {
 }
 
 /// How the menu is laid out: title, one line per level, the Play button and
-/// a line of help, centred in the window as one block.
+/// a line of help, centred in the window as one block. A list too long for
+/// the window shows only some of its lines, and scrolls to keep the
+/// selected one in view.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MenuLayout {
     pub title_y: f32,
@@ -143,6 +145,11 @@ pub struct MenuLayout {
     pub play: Button,
     pub help_y: f32,
     first_line_y: f32,
+    /// The number of the level on the first line shown.
+    first: usize,
+    /// How many lines are shown.
+    shown: usize,
+    /// How many levels there are.
     lines: usize,
 }
 
@@ -152,14 +159,24 @@ impl MenuLayout {
     const HELP_BAND: f32 = 32.0;
     /// Lines are this far apart when there is room: comfortable to tap.
     const LINE_STEP: f32 = 44.0;
+    /// Lines are never closer together than this. If the whole list does
+    /// not fit that way, only part of it is shown.
+    const MIN_LINE_STEP: f32 = 34.0;
 
-    pub fn new(view: Vec2, lines: usize) -> MenuLayout {
-        // The lines get whatever height the other three bands leave, and
-        // move closer together if that is not enough.
+    /// The menu for a list of `lines` levels, of which number `selected` is
+    /// the selected one.
+    pub fn new(view: Vec2, lines: usize, selected: usize) -> MenuLayout {
+        // The lines get whatever height the other three bands leave.
         let bands = Self::TITLE_BAND + Self::PLAY_BAND + Self::HELP_BAND;
         let room = view.y - bands - 2.0 * MARGIN;
-        let line_step = (room / lines as f32).min(Self::LINE_STEP);
-        let list = lines as f32 * line_step;
+        let fitting = ((room / Self::MIN_LINE_STEP) as usize).max(1);
+        let shown = lines.min(fitting);
+        let line_step = (room / shown as f32).min(Self::LINE_STEP);
+        let list = shown as f32 * line_step;
+
+        // The selected line sits in the middle of the lines shown, except
+        // near the ends of the list, where there is nothing more to show.
+        let first = selected.saturating_sub(shown / 2).min(lines - shown);
 
         // Working down from the top of the block.
         let top = (bands + list) / 2.0;
@@ -177,24 +194,49 @@ impl MenuLayout {
             },
             help_y: help_top - Self::HELP_BAND / 2.0,
             first_line_y: list_top - line_step / 2.0,
+            first,
+            shown,
             lines,
         }
     }
 
-    /// Height of the line of level number `i`.
+    /// The numbers of the levels whose lines are shown.
+    pub fn shown_lines(&self) -> std::ops::Range<usize> {
+        self.first..self.first + self.shown
+    }
+
+    /// Height of the line of level number `i`, which must be a shown one.
     pub fn line_y(&self, i: usize) -> f32 {
-        self.first_line_y - i as f32 * self.line_step
+        self.first_line_y - (i - self.first) as f32 * self.line_step
     }
 
     /// The number of the level whose line is at height `y`, if any.
     pub fn line_at(&self, y: f32) -> Option<usize> {
         // How many lines down from the first one, rounded to the nearest line.
         let lines_down = ((self.first_line_y - y) / self.line_step).round();
-        if lines_down < 0.0 || lines_down >= self.lines as f32 {
+        if lines_down < 0.0 || lines_down >= self.shown as f32 {
             return None;
         }
-        Some(lines_down as usize)
+        Some(self.first + lines_down as usize)
     }
+
+    /// Where to draw the mark that says there are more levels above the
+    /// lines shown, if there are any. It sits just above the first line.
+    pub fn more_above_y(&self) -> Option<f32> {
+        let y = self.first_line_y + self.line_step / 2.0 + Self::MORE_MARK / 2.0;
+        (self.first > 0).then_some(y)
+    }
+
+    /// The same for more levels below: just under the last line.
+    pub fn more_below_y(&self) -> Option<f32> {
+        let last_line_y = self.first_line_y - (self.shown - 1) as f32 * self.line_step;
+        let y = last_line_y - self.line_step / 2.0 - Self::MORE_MARK / 2.0;
+        (self.first + self.shown < self.lines).then_some(y)
+    }
+
+    /// Height of the "more levels" marks. They fit in the space the title
+    /// and the Play button leave free at the edge of their bands.
+    const MORE_MARK: f32 = 12.0;
 }
 
 #[cfg(test)]
@@ -303,16 +345,16 @@ mod tests {
     #[test]
     fn the_whole_menu_fits_every_screen() {
         for view in ALL_SCREENS {
-            let menu = MenuLayout::new(view, LEVELS.len());
+            let menu = MenuLayout::new(view, LEVELS.len(), 0);
             let half_line = menu.line_step / 2.0;
-            let last = LEVELS.len() - 1;
+            let shown = menu.shown_lines();
             let play_top = menu.play.centre.y + menu.play.size.y / 2.0;
             let play_bottom = menu.play.centre.y - menu.play.size.y / 2.0;
 
             // From the top down: title, level lines, Play button, help.
             assert!(menu.title_y + MenuLayout::TITLE_BAND / 2.0 <= view.y / 2.0, "on {view}");
-            assert!(menu.line_y(0) + half_line <= menu.title_y, "on {view}");
-            assert!(menu.line_y(last) - half_line >= play_top, "on {view}");
+            assert!(menu.line_y(shown.start) + half_line <= menu.title_y, "on {view}");
+            assert!(menu.line_y(shown.end - 1) - half_line >= play_top, "on {view}");
             assert!(play_bottom >= menu.help_y, "on {view}");
             assert!(menu.help_y - MenuLayout::HELP_BAND / 2.0 >= -view.y / 2.0, "on {view}");
         }
@@ -320,28 +362,89 @@ mod tests {
 
     #[test]
     fn menu_lines_are_far_enough_apart_to_tap_on_a_phone() {
-        assert_eq!(MenuLayout::new(PHONE, 12).line_step, MenuLayout::LINE_STEP);
+        assert_eq!(MenuLayout::new(PHONE, 12, 0).line_step, MenuLayout::LINE_STEP);
+    }
+
+    #[test]
+    fn a_short_list_is_shown_whole() {
+        assert_eq!(MenuLayout::new(PHONE, 12, 7).shown_lines(), 0..12);
+    }
+
+    #[test]
+    fn a_long_list_shows_only_the_lines_that_fit_comfortably() {
+        for view in ALL_SCREENS {
+            let menu = MenuLayout::new(view, 40, 0);
+            assert!(menu.shown_lines().len() < 40, "on {view}");
+            assert!(menu.line_step >= MenuLayout::MIN_LINE_STEP, "on {view}");
+        }
+    }
+
+    #[test]
+    fn a_long_list_scrolls_to_keep_the_selected_line_in_view() {
+        for view in ALL_SCREENS {
+            for selected in 0..40 {
+                let shown = MenuLayout::new(view, 40, selected).shown_lines();
+                assert!(shown.contains(&selected), "line {selected} on {view}");
+                assert!(shown.end <= 40, "line {selected} on {view}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_long_list_starts_at_the_top_and_ends_at_the_bottom() {
+        assert_eq!(MenuLayout::new(SMALL_PHONE, 40, 0).shown_lines().start, 0);
+        assert_eq!(MenuLayout::new(SMALL_PHONE, 40, 39).shown_lines().end, 40);
+    }
+
+    #[test]
+    fn the_list_says_when_it_goes_on_above_or_below() {
+        let top = MenuLayout::new(SMALL_PHONE, 40, 0);
+        assert!(top.more_above_y().is_none() && top.more_below_y().is_some());
+        let middle = MenuLayout::new(SMALL_PHONE, 40, 20);
+        assert!(middle.more_above_y().is_some() && middle.more_below_y().is_some());
+        let bottom = MenuLayout::new(SMALL_PHONE, 40, 39);
+        assert!(bottom.more_above_y().is_some() && bottom.more_below_y().is_none());
+        let short = MenuLayout::new(PHONE, 12, 5);
+        assert!(short.more_above_y().is_none() && short.more_below_y().is_none());
     }
 
     #[test]
     fn a_menu_line_is_found_by_its_height() {
-        let menu = MenuLayout::new(PHONE, 12);
+        let menu = MenuLayout::new(PHONE, 12, 0);
         assert_eq!(menu.line_at(menu.line_y(0)), Some(0));
         assert_eq!(menu.line_at(menu.line_y(3)), Some(3));
         assert_eq!(menu.line_at(menu.line_y(11)), Some(11));
     }
 
     #[test]
+    fn a_line_of_a_scrolled_list_is_found_by_its_height() {
+        let menu = MenuLayout::new(SMALL_PHONE, 40, 20);
+        let shown = menu.shown_lines();
+        assert!(shown.start > 0);
+        assert_eq!(menu.line_at(menu.line_y(shown.start)), Some(shown.start));
+        assert_eq!(menu.line_at(menu.line_y(20)), Some(20));
+        assert_eq!(menu.line_at(menu.line_y(shown.end - 1)), Some(shown.end - 1));
+    }
+
+    #[test]
     fn a_tap_between_two_lines_picks_the_nearer_one() {
-        let menu = MenuLayout::new(PHONE, 12);
+        let menu = MenuLayout::new(PHONE, 12, 0);
         assert_eq!(menu.line_at(menu.line_y(3) - menu.line_step * 0.4), Some(3));
         assert_eq!(menu.line_at(menu.line_y(3) - menu.line_step * 0.6), Some(4));
     }
 
     #[test]
     fn there_is_no_line_above_the_first_or_below_the_last() {
-        let menu = MenuLayout::new(PHONE, 12);
+        let menu = MenuLayout::new(PHONE, 12, 0);
         assert_eq!(menu.line_at(menu.line_y(0) + menu.line_step), None);
         assert_eq!(menu.line_at(menu.line_y(11) - menu.line_step), None);
+    }
+
+    #[test]
+    fn there_is_no_line_past_the_ends_of_a_scrolled_list() {
+        let menu = MenuLayout::new(SMALL_PHONE, 40, 20);
+        let shown = menu.shown_lines();
+        assert_eq!(menu.line_at(menu.line_y(shown.start) + menu.line_step), None);
+        assert_eq!(menu.line_at(menu.line_y(shown.end - 1) - menu.line_step), None);
     }
 }

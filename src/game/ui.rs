@@ -52,7 +52,8 @@ pub fn handle_menu_input(
     mut screen: ResMut<NextState<Screen>>,
 ) {
     // Everything asked for since the last frame: by keyboard, then by touch.
-    let layout = MenuLayout::new(view.0, LEVELS.len());
+    // Taps are judged against the list as it was drawn.
+    let layout = MenuLayout::new(view.0, LEVELS.len(), selected.0);
     let mut asked: Vec<MenuCommand> = keys_pressed(&mut keys).filter_map(menu_command).collect();
     asked.extend(
         gestures
@@ -83,10 +84,12 @@ pub fn draw_menu(
 ) {
     view::clear(&mut commands, &drawn);
 
-    let layout = MenuLayout::new(view.0, LEVELS.len());
+    let layout = MenuLayout::new(view.0, LEVELS.len(), selected.0);
     commands.spawn((Drawn, view::caption("Push Kitchen", 36.0, view::LIGHT_TEXT, layout.title_y)));
 
-    for (i, level) in LEVELS.iter().enumerate() {
+    // Only the lines that fit; the list scrolls with the selection.
+    for i in layout.shown_lines() {
+        let level = &LEVELS[i];
         let mut text = format!("{}. {}", i + 1, level.name);
         if progress.is_solved(level.id) {
             text += " (served)";
@@ -98,6 +101,9 @@ pub fn draw_menu(
         };
         let line = view::caption(&text, layout.font_size, colour, layout.line_y(i));
         commands.spawn((Drawn, line));
+    }
+    for y in [layout.more_above_y(), layout.more_below_y()].into_iter().flatten() {
+        commands.spawn((Drawn, view::caption(". . .", 14.0, view::DIM_TEXT, y)));
     }
 
     let help = if touch.0 {
@@ -127,9 +133,9 @@ mod tests {
         assert_eq!(menu_command(KeyCode::Space), Some(MenuCommand::Play));
     }
 
-    /// The menu on a phone held upright.
+    /// The menu on a phone held upright, with the first level selected.
     fn layout() -> MenuLayout {
-        MenuLayout::new(Vec2::new(430.0, 900.0), LEVELS.len())
+        MenuLayout::new(Vec2::new(430.0, 900.0), LEVELS.len(), 0)
     }
 
     #[test]

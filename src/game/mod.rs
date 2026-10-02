@@ -216,6 +216,15 @@ mod tests {
         app.world().resource::<Selected>().0
     }
 
+    /// How many things the menu draws when nothing has been touched: the
+    /// title, the lines of the list that fit (with a mark if there are
+    /// more below), and the key help.
+    fn menu_drawn_count() -> usize {
+        let menu = layout::MenuLayout::new(ViewSize::default().0, LEVELS.len(), 0);
+        let marks = usize::from(menu.more_below_y().is_some());
+        menu.shown_lines().len() + marks + 2
+    }
+
     fn drawn_count(app: &mut App) -> usize {
         app.world_mut()
             .query_filtered::<(), With<view::Drawn>>()
@@ -227,8 +236,7 @@ mod tests {
     fn the_game_starts_in_the_menu() {
         let mut app = headless_game(scratch_slot("starts-in-menu"));
         assert_eq!(screen(&app), Screen::Menu);
-        // The title, one line per level, and the key help.
-        assert_eq!(drawn_count(&mut app), LEVELS.len() + 2);
+        assert_eq!(drawn_count(&mut app), menu_drawn_count());
     }
 
     #[test]
@@ -416,9 +424,25 @@ mod tests {
     }
 
     #[test]
+    fn the_menu_scrolls_down_to_the_last_level() {
+        let mut app = headless_game(scratch_slot("scroll"));
+        for _ in 0..LEVELS.len() {
+            tap(&mut app, KeyCode::ArrowDown);
+        }
+        let last = LEVELS.len() - 1;
+        assert_eq!(selected(&app), last);
+
+        // The last level's line is on screen: tapping it keeps it selected.
+        let menu = layout::MenuLayout::new(ViewSize::default().0, LEVELS.len(), last);
+        gesture(&mut app, Gesture::Tap(Vec2::new(0.0, menu.line_y(last))));
+        app.update();
+        assert_eq!(selected(&app), last);
+    }
+
+    #[test]
     fn tapping_a_level_in_the_menu_selects_it() {
         let mut app = headless_game(scratch_slot("tap-level"));
-        let menu = layout::MenuLayout::new(ViewSize::default().0, LEVELS.len());
+        let menu = layout::MenuLayout::new(ViewSize::default().0, LEVELS.len(), 0);
         gesture(&mut app, Gesture::Tap(Vec2::new(0.0, menu.line_y(3))));
         app.update();
 
@@ -512,6 +536,53 @@ mod tests {
         assert_eq!(count::<view::Slide>(&mut app), 2);
     }
 
+    /// Starts the level with this id, as picking it in the menu would.
+    fn start(app: &mut App, id: &str) {
+        let number = LEVELS
+            .iter()
+            .position(|level| level.id == id)
+            .expect("there should be a level with that id");
+        app.world_mut().resource_mut::<Selected>().0 = number;
+        tap(app, KeyCode::Enter);
+    }
+
+    /// Walks the chef of "Tomato soup" straight onto the stove.
+    fn burn_the_chef(app: &mut App) {
+        start(app, "tomato-soup");
+        for key in [KeyCode::ArrowUp, KeyCode::ArrowRight, KeyCode::ArrowRight, KeyCode::ArrowRight] {
+            tap(app, key);
+        }
+        assert!(app.world().resource::<Session>().board().is_burnt());
+    }
+
+    #[test]
+    fn a_burnt_chef_stays_burnt_whatever_is_pressed() {
+        let mut app = headless_game(scratch_slot("burnt-stays"));
+        burn_the_chef(&mut app);
+        for key in [KeyCode::KeyZ, KeyCode::ArrowLeft, KeyCode::Enter] {
+            tap(&mut app, key);
+        }
+        assert_eq!(screen(&app), Screen::Playing);
+        assert!(app.world().resource::<Session>().board().is_burnt());
+    }
+
+    #[test]
+    fn r_starts_a_burnt_kitchen_again() {
+        let mut app = headless_game(scratch_slot("burnt-restart"));
+        burn_the_chef(&mut app);
+        tap(&mut app, KeyCode::KeyR);
+        let session = app.world().resource::<Session>();
+        assert_eq!(session.board(), &LEVELS[selected(&app)].board());
+    }
+
+    #[test]
+    fn a_mouse_slides_along_with_the_chef() {
+        let mut app = headless_game(scratch_slot("slide-mouse"));
+        start(&mut app, "mouse-in-the-house");
+        tap(&mut app, KeyCode::ArrowDown);
+        assert_eq!(count::<view::Slide>(&mut app), 2);
+    }
+
     #[test]
     fn a_move_plays_one_sound() {
         let mut app = headless_game(scratch_slot("sound"));
@@ -527,7 +598,7 @@ mod tests {
         tap(&mut app, KeyCode::Escape);
 
         assert_eq!(screen(&app), Screen::Menu);
-        assert_eq!(drawn_count(&mut app), LEVELS.len() + 2);
+        assert_eq!(drawn_count(&mut app), menu_drawn_count());
     }
 
     #[test]

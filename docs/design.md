@@ -77,6 +77,28 @@ One character per square.
 
 The chef can walk over chopping boards and hatches, but not over a stove. An item or a mouse cannot start on a station or a hatch: it starts on plain floor.
 
+### The kitchens
+
+The first twelve teach pushing, cooking and the twists. The thirteen after them have walls inside the room and are each built around one idea:
+
+| Kitchen | Idea |
+|---|---|
+| Hot plate | A stove in a doorway: dishes go through it, the chef has to walk round. |
+| Melt | Bread waiting on the stove, cheese pushed into it: a toastie at once. |
+| Pantry | Three rooms and two doors: which way round to push things. |
+| Thin ice | Ice that ends in a flame. Something has to stand in the way first. |
+| Oil spill | Getting about on grease, where the chef stops only at the edges. |
+| Leap of faith | Sliding at a stove is safe while there is a dish on it to push. |
+| A mouse in the house | Waiting for the mouse to pass. |
+| Pest control | An item that is in the way and cannot be pushed aside can be fed to the mouse. |
+| Grease lightning | Food never survives a stop on this mouse's path, so it has to cross in a single slide. |
+| Escort | Walking between the mouse and the dish keeps the mouse off it. |
+| Quick service | Both hatches are on the mouse's path: serve them between two of its rounds. |
+| Out of step | The mouse is there every time the chef arrives, until the chef's rhythm changes. |
+| Full house | Everything at once, and the order matters. |
+
+A note on mice and rhythm: a mouse on a path of two squares, or on the middle square of a path of three, is back on the same square every second move, and the chef, walking one square per move, always arrives on the same beat. Waiting does not help then. What changes the beat is a move that covers an even number of squares (a slide over grease, reaching over a stove) or standing in the mouse's way. On a longer path the mouse takes longer to come back, and stepping away and back is enough to wait for it.
+
 ## Architecture
 
 Two layers with a one-way dependency: Bevy code knows the puzzle core, the core knows nothing about Bevy.
@@ -140,7 +162,7 @@ The camera shows the window pixel for pixel, and `layout.rs` works out where eve
 
 - **Kitchen:** squares are as big as fits between the kitchen's name above and the controls below, up to 96 pixels. The name, kitchen and controls are centred as one block.
 - **Turning:** if the kitchen's squares come out bigger with rows and columns swapped, it is drawn that way. So a wide kitchen fills a tall phone screen, and turns back when the phone is turned. Only the picture and the input know about this: arrow keys and swipes mean directions on screen, and conveyor arrows are drawn the way items travel on screen. The puzzle itself, the level files and the saved progress are the same on every device.
-- **Menu:** lines are 44 pixels apart when there is room, closer together when there is not.
+- **Menu:** lines are 44 pixels apart when there is room, and never closer than 34. If the whole list does not fit that way, only part of it is shown: the list scrolls so that the selected kitchen stays in view, in the middle where possible, and three dots mark the end where there is more. Tapping a line near the edge selects it, which scrolls the list on.
 - **Resizing:** the window's size is tracked each frame, and a change redraws the current screen.
 
 ## Touch
@@ -181,11 +203,12 @@ Each milestone ends with something runnable.
 | 7 | Content | 12 kitchens, playtesting, web build playable in a browser | WebAssembly, `cfg` for per-platform code, build profiles |
 | 8 | Burning | The stove burns the chef, who reaches over it to push; a burnt kitchen can only be restarted | a flag in the state, const generics (`buttons`), an enum for the kitchen's stage |
 | 9 | Hazards | Flames, grease and mice | a `while` loop over a small enum (`Walk`), a `Vec` of structs in the state, a fourth phase in `step` |
+| 10 | More kitchens | 13 new kitchens with walls inside and hazards (25 in all), a menu that scrolls | ranges, `saturating_sub`, `Option` with `then_some` |
 
 ## Verification
 
 - `cargo test`: every puzzle rule (move, push, blocked push, transform, combine, solved) has a unit test.
-- `cargo test -- --ignored --nocapture`: searches every kitchen for a solution and prints the fewest moves each one needs. Slow, so it is left out of the plain `cargo test`; run it after adding or changing a level.
+- `cargo test -- --ignored --nocapture`: searches every kitchen for a solution and prints the fewest moves each one needs. Slow, so it is left out of the plain `cargo test`; run it after adding or changing a level. The search never steps on anything hot, and it tells boards apart by where the mice are and which way they run, so its answer allows for waiting.
 - `cargo run`: play the current level set by hand.
 - `cargo clippy`: no warnings.
 
