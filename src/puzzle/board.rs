@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::recipes::{combine, transform};
-use super::types::{Dir, Item, Pos, StationKind, Tile};
+use super::types::{Dir, Item, Mouse, Pos, StationKind, Tile};
 
 /// The whole state of one kitchen at one moment.
 #[derive(Debug, Clone, PartialEq)]
@@ -12,8 +12,23 @@ pub struct Board {
     tiles: Vec<Tile>,
     items: HashMap<Pos, Item>,
     chef: Pos,
+    /// Always in the same order, so a mouse can be told apart by its place.
+    mice: Vec<Mouse>,
+    /// How many items the mice have eaten so far.
+    eaten: u32,
     /// True once the chef has stepped on something hot. Nothing moves after that.
     burnt: bool,
+}
+
+/// What became of the chef's attempt to take one step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Walk {
+    /// Something solid was in the way. Nothing changed.
+    Blocked,
+    /// The chef pushed an item off a stove without leaving their square.
+    Reached,
+    /// The chef is on the next square.
+    Stepped,
 }
 
 impl Board {
@@ -23,6 +38,7 @@ impl Board {
         tiles: Vec<Tile>,
         items: HashMap<Pos, Item>,
         chef: Pos,
+        mice: Vec<Mouse>,
     ) -> Self {
         Board {
             width,
@@ -30,6 +46,8 @@ impl Board {
             tiles,
             items,
             chef,
+            mice,
+            eaten: 0,
             burnt: false,
         }
     }
@@ -46,8 +64,22 @@ impl Board {
         self.chef
     }
 
-    /// True if the chef has stepped on a stove. The kitchen is lost: the
-    /// only way on is to start it again.
+    /// Every mouse in the kitchen, always in the same order.
+    pub fn mice(&self) -> &[Mouse] {
+        &self.mice
+    }
+
+    /// How many items the mice have eaten since the kitchen started.
+    pub fn eaten(&self) -> u32 {
+        self.eaten
+    }
+
+    fn mouse_on(&self, pos: Pos) -> bool {
+        self.mice.iter().any(|mouse| mouse.pos == pos)
+    }
+
+    /// True if the chef has stepped on a stove or into a flame. The kitchen
+    /// is lost: the only way on is to start it again.
     pub fn is_burnt(&self) -> bool {
         self.burnt
     }
@@ -73,34 +105,57 @@ impl Board {
     /// The board after the chef tries to move one square in `dir`,
     /// or `None` if the move is not allowed.
     ///
-    /// A move has three phases: the chef walks, the item in the way (if any)
-    /// is shoved, and then the conveyors run.
+    /// A move has four phases: the chef walks (and slides on, if on grease),
+    /// shoving the item in the way, then the conveyors run, and then the
+    /// mice.
     pub fn step(&self, dir: Dir) -> Option<Board> {
         if self.burnt {
             return None;
         }
-        let dest = self.chef.step(dir);
-        if self.tile(dest) == Tile::Wall {
-            return None;
-        }
-
         let mut next = self.clone();
-        let stove = self.tile(dest) == Tile::Station(StationKind::Stove);
-        if next.item(dest).is_some() {
-            // If the item in the way will not budge, neither does the chef.
-            if !next.shove(dest, dir) {
-                return None;
+        match next.walk(dir) {
+            Walk::Blocked => return None,
+            Walk::Reached => {}
+            Walk::Stepped => {
+                // On grease the chef cannot stop: one step follows another
+                // until they are off it, or one of them does not come off.
+                while next.is_slipping() && next.walk(dir) == Walk::Stepped {}
             }
-            // The chef reaches over a stove to push what is on it, and stays put.
-            if !stove {
-                next.chef = dest;
-            }
-        } else {
-            next.chef = dest;
-            next.burnt = stove;
         }
         next.run_conveyors();
+        next.run_mice();
         Some(next)
+    }
+
+    /// True while the chef is standing on grease, unburnt.
+    fn is_slipping(&self) -> bool {
+        !self.burnt && self.tile(self.chef) == Tile::Grease
+    }
+
+    /// The chef takes one step in `dir`, if nothing solid is in the way,
+    /// shoving an item that is.
+    fn walk(&mut self, dir: Dir) -> Walk {
+        let dest = self.chef.step(dir);
+        if self.tile(dest) == Tile::Wall || self.mouse_on(dest) {
+            return Walk::Blocked;
+        }
+        let hot = matches!(
+            self.tile(dest),
+            Tile::Flame | Tile::Station(StationKind::Stove)
+        );
+        if self.item(dest).is_some() {
+            // If the item in the way will not budge, neither does the chef.
+            if !self.shove(dest, dir) {
+                return Walk::Blocked;
+            }
+            // The chef reaches over a stove to push what is on it, and stays put.
+            if hot {
+                return Walk::Reached;
+            }
+        }
+        self.chef = dest;
+        self.burnt = hot;
+        Walk::Stepped
     }
 
     /// Moves the item on `from` one square in `dir`, if nothing is in the way.
@@ -113,6 +168,12 @@ impl Board {
         let Some(moving) = self.item(from) else {
             return false;
         };
+        // A mouse eats whatever comes its way.
+        if self.mouse_on(to) {
+            self.items.remove(&from);
+            self.eaten += 1;
+            return true;
+        }
         // An item already there blocks the way, unless the two combine.
         let landed = match self.item(to) {
             Some(waiting) => match combine(moving, waiting) {
@@ -124,7 +185,7 @@ impl Board {
 
         self.items.remove(&from);
         match self.tile(to) {
-            Tile::Bin => {}
+            Tile::Bin | Tile::Flame => {}
             Tile::Station(station) => {
                 self.items.insert(to, transform(station, landed).unwrap_or(landed));
             }
@@ -173,6 +234,35 @@ impl Board {
         }
     }
 
+    /// Every mouse runs one square the way it is heading, or back the way it
+    /// came if it cannot, and eats the item it finds there.
+    fn run_mice(&mut self) {
+        for i in 0..self.mice.len() {
+            let mouse = self.mice[i];
+            let ways = [mouse.heading, mouse.heading.opposite()];
+            let way = ways
+                .into_iter()
+                .find(|&way| self.mouse_can_enter(mouse.pos.step(way)));
+            // With both ways shut, it waits where it is.
+            if let Some(heading) = way {
+                let pos = mouse.pos.step(heading);
+                if self.items.remove(&pos).is_some() {
+                    self.eaten += 1;
+                }
+                self.mice[i] = Mouse { pos, heading };
+            }
+        }
+    }
+
+    /// Mice keep off anything hot, and do not climb over the chef or each other.
+    fn mouse_can_enter(&self, pos: Pos) -> bool {
+        let shut = matches!(
+            self.tile(pos),
+            Tile::Wall | Tile::Flame | Tile::Station(StationKind::Stove)
+        );
+        !shut && pos != self.chef && !self.mouse_on(pos)
+    }
+
     /// True when every hatch holds the dish it wants. A burnt kitchen is
     /// never solved.
     pub fn is_solved(&self) -> bool {
@@ -197,7 +287,7 @@ impl Board {
 mod tests {
     use super::*;
     use crate::puzzle::level::parse;
-    use crate::puzzle::types::StationKind;
+    use crate::puzzle::types::{Mouse, StationKind};
 
     fn board(text: &str) -> Board {
         parse(text).expect("test level should parse")
@@ -297,7 +387,7 @@ mod tests {
             (Pos::new(1, 0), Item::Bread),
             (Pos::new(2, 0), Item::Cheese),
         ]);
-        let before = Board::new(3, 1, tiles, items, Pos::new(0, 0));
+        let before = Board::new(3, 1, tiles, items, Pos::new(0, 0), Vec::new());
 
         let after = before.step(Dir::Right).expect("push should be allowed");
         assert_eq!(after.item(Pos::new(2, 0)), Some(Item::Toastie));
@@ -360,6 +450,185 @@ mod tests {
         assert!(served.is_solved());
         let burnt = served.step(Dir::Left).and_then(|board| board.step(Dir::Down));
         assert!(!burnt.expect("walking should be allowed").is_solved());
+    }
+
+    #[test]
+    fn walking_into_a_flame_burns_the_chef() {
+        let after = pushed_right("#@!#");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert!(after.is_burnt());
+    }
+
+    #[test]
+    fn an_item_pushed_into_a_flame_is_gone() {
+        let after = pushed_right("#@t!#");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert_eq!(after.items().count(), 0);
+        assert!(!after.is_burnt());
+    }
+
+    #[test]
+    fn an_item_sliding_into_a_flame_is_gone() {
+        let after = pushed_right("#@t**!.#");
+        assert_eq!(after.items().count(), 0);
+    }
+
+    #[test]
+    fn the_chef_slides_across_grease() {
+        let after = pushed_right("#@%%%..#");
+        assert_eq!(after.chef(), Pos::new(5, 0));
+    }
+
+    #[test]
+    fn a_sliding_chef_stops_against_a_wall() {
+        let after = pushed_right("#@%%#");
+        assert_eq!(after.chef(), Pos::new(3, 0));
+    }
+
+    #[test]
+    fn a_chef_resting_on_grease_can_walk_off_it() {
+        let stuck = pushed_right("#@%%#\n###.#");
+        let after = stuck.step(Dir::Down).expect("walking should be allowed");
+        assert_eq!(after.chef(), Pos::new(3, 1));
+    }
+
+    #[test]
+    fn a_sliding_chef_pushes_what_is_in_the_way() {
+        let after = pushed_right("#@%%t..#");
+        assert_eq!(after.chef(), Pos::new(4, 0));
+        assert_eq!(after.item(Pos::new(5, 0)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn a_sliding_chef_stops_behind_an_item_that_cannot_move() {
+        let after = pushed_right("#@%%t#");
+        assert_eq!(after.chef(), Pos::new(3, 0));
+        assert_eq!(after.item(Pos::new(4, 0)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn grease_carries_the_chef_onto_a_stove() {
+        let after = pushed_right("#@%~.#");
+        assert_eq!(after.chef(), Pos::new(3, 0));
+        assert!(after.is_burnt());
+    }
+
+    #[test]
+    fn a_chef_on_grease_reaching_over_a_stove_slides_no_further() {
+        let before = board_with_item_at("#@%~.#", 3, Item::TomatoSoup);
+        let after = before.step(Dir::Right).expect("move should be allowed");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert_eq!(after.item(Pos::new(4, 0)), Some(Item::TomatoSoup));
+        assert!(!after.is_burnt());
+    }
+
+    #[test]
+    fn items_do_not_slide_on_grease() {
+        let after = pushed_right("#@t%%.#");
+        assert_eq!(after.item(Pos::new(3, 0)), Some(Item::Tomato));
+    }
+
+    /// Where the only mouse of `board` is.
+    fn mouse(board: &Board) -> Mouse {
+        assert_eq!(board.mice().len(), 1);
+        board.mice()[0]
+    }
+
+    #[test]
+    fn a_mouse_runs_one_square_each_time_the_chef_moves() {
+        let after = pushed_right("#@..#\n#-..#");
+        assert_eq!(mouse(&after), Mouse { pos: Pos::new(2, 1), heading: Dir::Right });
+    }
+
+    #[test]
+    fn a_mouse_does_not_run_when_the_chef_cannot_move() {
+        let before = board("#.@#\n#-..#");
+        assert_eq!(before.step(Dir::Right), None);
+    }
+
+    #[test]
+    fn a_mouse_turns_round_at_a_wall() {
+        let after = pushed_right("#@..#\n#.-#");
+        assert_eq!(mouse(&after), Mouse { pos: Pos::new(1, 1), heading: Dir::Left });
+    }
+
+    #[test]
+    fn an_up_and_down_mouse_runs_down_first() {
+        let after = pushed_right("#@.#\n#|.#\n#..#");
+        assert_eq!(mouse(&after), Mouse { pos: Pos::new(1, 2), heading: Dir::Down });
+    }
+
+    #[test]
+    fn a_mouse_turns_round_at_a_stove_and_at_a_flame() {
+        for text in ["#@..#\n#.-~#", "#@..#\n#.-!#"] {
+            let after = pushed_right(text);
+            assert_eq!(mouse(&after).pos, Pos::new(1, 1), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_mouse_turns_round_at_the_chef() {
+        let away = pushed_right("#-.@.#");
+        assert_eq!(mouse(&away).pos, Pos::new(2, 0));
+        // The chef steps back into the mouse's way.
+        let back = away.step(Dir::Left).expect("walking should be allowed");
+        assert_eq!(mouse(&back), Mouse { pos: Pos::new(1, 0), heading: Dir::Left });
+    }
+
+    #[test]
+    fn a_mouse_with_nowhere_to_go_stays_put() {
+        let after = pushed_right("#@..#\n#-###");
+        assert_eq!(mouse(&after), Mouse { pos: Pos::new(1, 1), heading: Dir::Right });
+    }
+
+    #[test]
+    fn the_chef_cannot_walk_into_a_mouse() {
+        let before = board("#@-#");
+        assert_eq!(before.step(Dir::Right), None);
+    }
+
+    #[test]
+    fn a_mouse_stops_a_sliding_chef() {
+        let after = pushed_right("#@%%|#\n####.#");
+        assert_eq!(after.chef(), Pos::new(3, 0));
+    }
+
+    #[test]
+    fn a_mouse_eats_the_food_it_runs_into() {
+        let after = pushed_right("#@..#\n#-t.#");
+        assert_eq!(mouse(&after).pos, Pos::new(2, 1));
+        assert_eq!(after.items().count(), 0);
+    }
+
+    #[test]
+    fn food_pushed_into_a_mouse_is_eaten() {
+        let after = pushed_right("#@t-.#");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert_eq!(after.items().count(), 0);
+    }
+
+    #[test]
+    fn food_carried_into_a_mouse_is_eaten() {
+        let after = pushed_right("#@t>|.#\n####.##");
+        assert_eq!(after.items().count(), 0);
+    }
+
+    #[test]
+    fn what_the_mice_eat_is_counted() {
+        assert_eq!(pushed_right("#@..#\n#-t.#").eaten(), 1);
+        assert_eq!(pushed_right("#@t-.#").eaten(), 1);
+    }
+
+    #[test]
+    fn an_item_lost_some_other_way_is_not_counted_as_eaten() {
+        assert_eq!(pushed_right("#@tx#\n#-..#").eaten(), 0);
+    }
+
+    #[test]
+    fn two_mice_do_not_share_a_square() {
+        let after = pushed_right("#@...#\n#--.#");
+        let squares: Vec<Pos> = after.mice().iter().map(|mouse| mouse.pos).collect();
+        assert_eq!(squares, vec![Pos::new(1, 1), Pos::new(3, 1)]);
     }
 
     #[test]

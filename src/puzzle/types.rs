@@ -21,7 +21,7 @@ impl Pos {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Dir {
     Up,
     Down,
@@ -30,6 +30,16 @@ pub enum Dir {
 }
 
 impl Dir {
+    /// The direction pointing back the way this one came from.
+    pub fn opposite(self) -> Dir {
+        match self {
+            Dir::Up => Dir::Down,
+            Dir::Down => Dir::Up,
+            Dir::Left => Dir::Right,
+            Dir::Right => Dir::Left,
+        }
+    }
+
     /// The direction after swapping rows and columns: what went across now
     /// goes down, and what went down now goes across.
     pub fn transposed(self) -> Dir {
@@ -58,12 +68,26 @@ pub enum Tile {
     Ice,
     /// An item that lands here is gone.
     Bin,
+    /// Burns the chef, and burns away any item that lands here.
+    Flame,
+    /// The chef cannot stop here: they slide on the way they were going.
+    /// Items are not affected.
+    Grease,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StationKind {
     ChoppingBoard,
     Stove,
+}
+
+/// A mouse, running to and fro along a row or a column. It eats any item
+/// it runs into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Mouse {
+    pub pos: Pos,
+    /// The way it will run next, unless something is in the way.
+    pub heading: Dir,
 }
 
 /// Something the chef can push.
@@ -101,6 +125,14 @@ mod tests {
         assert_eq!(Dir::Down.transposed(), Dir::Right);
         assert_eq!(Dir::Left.transposed(), Dir::Up);
         assert_eq!(Dir::Up.transposed(), Dir::Left);
+    }
+
+    #[test]
+    fn the_opposite_of_a_direction_points_back() {
+        assert_eq!(Dir::Up.opposite(), Dir::Down);
+        assert_eq!(Dir::Down.opposite(), Dir::Up);
+        assert_eq!(Dir::Left.opposite(), Dir::Right);
+        assert_eq!(Dir::Right.opposite(), Dir::Left);
     }
 
     #[test]

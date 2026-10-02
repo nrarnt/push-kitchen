@@ -87,15 +87,21 @@ mod tests {
     use super::*;
     use crate::puzzle::{Dir, Item, Pos};
 
-    /// Everything that can differ between two boards of the same level:
-    /// where the chef is, and which item is where.
-    type Key = (Pos, Vec<(Pos, Item)>);
+    /// Everything that can differ between two boards of the same level and
+    /// matters for what can still happen: where the chef is, which item is
+    /// where, and where the mice are and which way they run.
+    type Key = (Pos, Vec<(Pos, Item)>, Vec<(Pos, Dir)>);
 
     fn key(board: &Board) -> Key {
         let mut items: Vec<(Pos, Item)> = board.items().collect();
         // Sorted, so the same items always give the same key.
         items.sort_by_key(|(pos, _)| (pos.y, pos.x));
-        (board.chef(), items)
+        let mice = board
+            .mice()
+            .iter()
+            .map(|mouse| (mouse.pos, mouse.heading))
+            .collect();
+        (board.chef(), items, mice)
     }
 
     /// Tries every sequence of moves, shortest first, until one solves the
@@ -129,6 +135,19 @@ mod tests {
     fn the_solver_notices_a_dead_end() {
         // The tomato is stuck against the left wall, away from its hatch.
         assert_eq!(fewest_moves(puzzle::parse("#t@.T#").unwrap()), None);
+    }
+
+    #[test]
+    fn the_solver_does_not_walk_through_fire() {
+        assert_eq!(fewest_moves(puzzle::parse("#@!tT#").unwrap()), None);
+    }
+
+    #[test]
+    fn the_solver_waits_for_a_mouse_to_pass() {
+        // Pushing at once would feed the tomato to the mouse. A step away
+        // and back lets the mouse run past first.
+        let board = puzzle::parse("###|##\n.@t.T#\n###.##\n###.##").unwrap();
+        assert_eq!(fewest_moves(board), Some(4));
     }
 
     #[test]

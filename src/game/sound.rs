@@ -10,17 +10,21 @@ pub enum Sfx {
     Chop,
     Sizzle,
     Combine,
-    /// An item dropping into the bin.
+    /// An item dropping into the bin, or burning up in a flame.
     Bin,
     /// Walking into something that will not move.
     Bump,
     Solved,
     /// The chef stepping onto something hot.
     Burnt,
+    /// A mouse eating an item.
+    Squeak,
+    /// The chef sliding over grease.
+    Slip,
 }
 
 impl Sfx {
-    const ALL: [Sfx; 9] = [
+    const ALL: [Sfx; 11] = [
         Sfx::Step,
         Sfx::Push,
         Sfx::Chop,
@@ -30,6 +34,8 @@ impl Sfx {
         Sfx::Bump,
         Sfx::Solved,
         Sfx::Burnt,
+        Sfx::Squeak,
+        Sfx::Slip,
     ];
 }
 
@@ -45,6 +51,8 @@ fn file(sfx: Sfx) -> &'static str {
         Sfx::Bump => "sounds/bump.wav",
         Sfx::Solved => "sounds/solved.wav",
         Sfx::Burnt => "sounds/burnt.wav",
+        Sfx::Squeak => "sounds/squeak.wav",
+        Sfx::Slip => "sounds/slip.wav",
     }
 }
 
@@ -55,6 +63,9 @@ pub fn sound_of_move(before: &Board, after: &Board) -> Sfx {
     }
     if after.is_solved() && !before.is_solved() {
         return Sfx::Solved;
+    }
+    if after.eaten() > before.eaten() {
+        return Sfx::Squeak;
     }
     // The kinds of item that left their square, and an item that is
     // somewhere it was not before.
@@ -67,7 +78,12 @@ pub fn sound_of_move(before: &Board, after: &Board) -> Sfx {
         .items()
         .find(|&(pos, item)| before.item(pos) != Some(item));
 
+    // Only grease takes the chef further than one square in a move.
+    let (from, to) = (before.chef(), after.chef());
+    let slid = (to.x - from.x).abs() + (to.y - from.y).abs() > 1;
+
     match landed {
+        None if left.is_empty() && slid => Sfx::Slip,
         None if left.is_empty() => Sfx::Step,
         None => Sfx::Bin,
         Some(_) if after.items().count() < before.items().count() => Sfx::Combine,
@@ -161,6 +177,31 @@ mod tests {
     #[test]
     fn an_item_dropping_into_the_bin_sounds_binned() {
         assert_eq!(sound_of_right("#@tx#"), Sfx::Bin);
+    }
+
+    #[test]
+    fn an_item_burning_up_in_a_flame_sounds_binned() {
+        assert_eq!(sound_of_right("#@t!#"), Sfx::Bin);
+    }
+
+    #[test]
+    fn a_mouse_eating_squeaks() {
+        assert_eq!(sound_of_right("#@..#\n#-t.#"), Sfx::Squeak);
+    }
+
+    #[test]
+    fn a_mouse_squeaks_when_food_is_pushed_into_it() {
+        assert_eq!(sound_of_right("#@t-.#"), Sfx::Squeak);
+    }
+
+    #[test]
+    fn sliding_over_grease_sounds_slippery() {
+        assert_eq!(sound_of_right("#@%%.#"), Sfx::Slip);
+    }
+
+    #[test]
+    fn a_single_step_onto_grease_is_just_a_step() {
+        assert_eq!(sound_of_right("#@%#"), Sfx::Step);
     }
 
     #[test]

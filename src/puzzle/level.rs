@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::board::Board;
-use super::types::{Dir, Item, Pos, StationKind, Tile};
+use super::types::{Dir, Item, Mouse, Pos, StationKind, Tile};
 
 /// Why a level file could not be turned into a `Board`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +28,8 @@ fn item_for(symbol: char) -> Option<Item> {
 /// Builds a `Board` from a text drawing of a kitchen.
 ///
 /// `#` wall, `.` floor, `@` chef, `/` chopping board, `~` stove,
-/// `^` `v` `<` `>` conveyors, `*` ice, `x` bin.
+/// `^` `v` `<` `>` conveyors, `*` ice, `x` bin, `!` flame, `%` grease.
+/// `-` is a mouse that runs from side to side, `|` one that runs up and down.
 ///
 /// A lowercase letter is an item on the floor: `t` tomato, `d` chopped
 /// (diced) tomato, `s` tomato soup, `b` bread, `c` cheese, `w` sandwich,
@@ -42,6 +43,7 @@ pub fn parse(text: &str) -> Result<Board, LevelError> {
     let mut tiles = vec![Tile::Wall; width * height];
     let mut items = HashMap::new();
     let mut chef = None;
+    let mut mice = Vec::new();
 
     for (y, line) in lines.iter().enumerate() {
         for (x, symbol) in line.chars().enumerate() {
@@ -57,6 +59,17 @@ pub fn parse(text: &str) -> Result<Board, LevelError> {
                 '>' => Tile::Conveyor(Dir::Right),
                 '*' => Tile::Ice,
                 'x' => Tile::Bin,
+                '!' => Tile::Flame,
+                '%' => Tile::Grease,
+                // A mouse sets off to the right, or downwards.
+                '-' => {
+                    mice.push(Mouse { pos, heading: Dir::Right });
+                    Tile::Floor
+                }
+                '|' => {
+                    mice.push(Mouse { pos, heading: Dir::Down });
+                    Tile::Floor
+                }
                 '@' => {
                     if chef.is_some() {
                         return Err(LevelError::ExtraChef);
@@ -79,7 +92,7 @@ pub fn parse(text: &str) -> Result<Board, LevelError> {
     }
 
     let chef = chef.ok_or(LevelError::NoChef)?;
-    Ok(Board::new(width as i32, height as i32, tiles, items, chef))
+    Ok(Board::new(width as i32, height as i32, tiles, items, chef, mice))
 }
 
 #[cfg(test)]
@@ -124,6 +137,28 @@ mod tests {
         let board = parse("@*x").unwrap();
         assert_eq!(board.tile(Pos::new(1, 0)), Tile::Ice);
         assert_eq!(board.tile(Pos::new(2, 0)), Tile::Bin);
+    }
+
+    #[test]
+    fn parse_reads_a_flame_and_grease() {
+        let board = parse("@!%").unwrap();
+        assert_eq!(board.tile(Pos::new(1, 0)), Tile::Flame);
+        assert_eq!(board.tile(Pos::new(2, 0)), Tile::Grease);
+    }
+
+    #[test]
+    fn parse_places_mice_on_floor_with_the_way_they_run() {
+        let board = parse("@-|").unwrap();
+        let across = Mouse { pos: Pos::new(1, 0), heading: Dir::Right };
+        let down = Mouse { pos: Pos::new(2, 0), heading: Dir::Down };
+        assert_eq!(board.mice(), [across, down]);
+        assert_eq!(board.tile(Pos::new(1, 0)), Tile::Floor);
+        assert_eq!(board.tile(Pos::new(2, 0)), Tile::Floor);
+    }
+
+    #[test]
+    fn a_kitchen_without_mice_has_none() {
+        assert!(parse("@.").unwrap().mice().is_empty());
     }
 
     #[test]

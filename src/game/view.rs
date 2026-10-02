@@ -20,6 +20,9 @@ const CHEF_SPRITE: &str = "sprites/chef.png";
 /// The chef after stepping on something hot.
 const BURNT_CHEF_SPRITE: &str = "sprites/chef_burnt.png";
 
+/// Drawn running up. The game turns the picture for the other directions.
+const MOUSE_SPRITE: &str = "sprites/mouse.png";
+
 /// The picture of a tile, as a file inside the `assets` folder.
 fn tile_sprite(tile: Tile) -> &'static str {
     match tile {
@@ -31,12 +34,14 @@ fn tile_sprite(tile: Tile) -> &'static str {
         Tile::Conveyor(_) => "sprites/conveyor.png",
         Tile::Ice => "sprites/ice.png",
         Tile::Bin => "sprites/bin.png",
+        Tile::Flame => "sprites/flame.png",
+        Tile::Grease => "sprites/grease.png",
     }
 }
 
-/// How far to turn the conveyor picture, which is drawn pointing up.
-/// Bevy turns anticlockwise, in radians.
-fn conveyor_turn(dir: Dir) -> f32 {
+/// How far to turn a picture that is drawn pointing up, so that it points
+/// in `dir`. Bevy turns anticlockwise, in radians.
+fn turn_from_up(dir: Dir) -> f32 {
     use std::f32::consts::PI;
     match dir {
         Dir::Up => 0.0,
@@ -59,7 +64,7 @@ fn item_sprite(item: Item) -> &'static str {
 }
 
 /// One tile of each kind that has its own picture.
-const TILE_KINDS: [Tile; 8] = [
+const TILE_KINDS: [Tile; 10] = [
     Tile::Floor,
     Tile::Wall,
     Tile::Station(StationKind::ChoppingBoard),
@@ -68,13 +73,17 @@ const TILE_KINDS: [Tile; 8] = [
     Tile::Conveyor(Dir::Up),
     Tile::Ice,
     Tile::Bin,
+    Tile::Flame,
+    Tile::Grease,
 ];
 
 /// Every picture file the game uses.
 fn sprite_files() -> impl Iterator<Item = &'static str> {
     let items = Item::ALL.into_iter().map(item_sprite);
     let tiles = TILE_KINDS.into_iter().map(tile_sprite);
-    items.chain(tiles).chain([CHEF_SPRITE, BURNT_CHEF_SPRITE])
+    items
+        .chain(tiles)
+        .chain([CHEF_SPRITE, BURNT_CHEF_SPRITE, MOUSE_SPRITE])
 }
 
 /// Starts loading every picture, and returns the handles that keep them loaded.
@@ -191,26 +200,22 @@ fn item_origin(before: &Board, after: &Board, pos: Pos) -> Option<Pos> {
         .min_by_key(|from| (from.x - pos.x).abs() + (from.y - pos.y).abs())
 }
 
-/// Draws something that can move, filling `scale` of a square `tile` pixels
-/// wide. It belongs on `to`; if it was on `from` a moment ago, it starts
-/// there and slides over.
+/// Draws something that can move. Its picture is placed on the square it
+/// belongs on; if it was at `from` a moment ago, it starts there and slides
+/// over. `tile` is the side of one square, in pixels.
 fn spawn_piece(
     commands: &mut Commands,
-    image: Handle<Image>,
-    tile: f32,
-    scale: f32,
-    layer: f32,
+    (sprite, mut transform): (Sprite, Transform),
     from: Option<Vec2>,
-    to: Vec2,
+    tile: f32,
 ) {
-    let size = tile * scale;
+    let to = transform.translation.truncate();
     match from {
-        Some(from) => commands.spawn((
-            Drawn,
-            picture(image, size, from, layer),
-            Slide::new(from, to, tile),
-        )),
-        None => commands.spawn((Drawn, picture(image, size, to, layer))),
+        Some(from) => {
+            transform.translation = from.extend(transform.translation.z);
+            commands.spawn((Drawn, sprite, transform, Slide::new(from, to, tile)))
+        }
+        None => commands.spawn((Drawn, sprite, transform)),
     };
 }
 
@@ -245,7 +250,7 @@ pub fn draw_board(
                 picture(assets.load(tile_sprite(tile)), tile_size, centre(pos), 0.0);
             if let Tile::Conveyor(dir) = tile {
                 // The arrows point the way items go as seen on screen.
-                transform.rotate_z(conveyor_turn(layout.turn(dir)));
+                transform.rotate_z(turn_from_up(layout.turn(dir)));
             }
             commands.spawn((Drawn, sprite, transform));
 
@@ -268,15 +273,27 @@ pub fn draw_board(
         let from = previous
             .and_then(|before| item_origin(before, board, pos))
             .map(centre);
-        spawn_piece(&mut commands, image, tile_size, 0.8, 1.0, from, centre(pos));
+        let piece = picture(image, tile_size * 0.8, centre(pos), 1.0);
+        spawn_piece(&mut commands, piece, from, tile_size);
+    }
+
+    // The mice are always listed in the same order, so each one slides from
+    // where the mouse in the same place of the list was before.
+    for (i, mouse) in board.mice().iter().enumerate() {
+        let image = assets.load(MOUSE_SPRITE);
+        let from = previous.map(|before| centre(before.mice()[i].pos));
+        let (sprite, mut transform) = picture(image, tile_size * 0.8, centre(mouse.pos), 1.5);
+        // Its nose points the way it will run, as seen on screen.
+        transform.rotate_z(turn_from_up(layout.turn(mouse.heading)));
+        spawn_piece(&mut commands, (sprite, transform), from, tile_size);
     }
 
     let stage = Stage::of(board);
 
     let chef = if stage == Stage::Burnt { BURNT_CHEF_SPRITE } else { CHEF_SPRITE };
-    let image = assets.load(chef);
     let from = previous.map(|before| centre(before.chef()));
-    spawn_piece(&mut commands, image, tile_size, 0.9, 2.0, from, centre(board.chef()));
+    let piece = picture(assets.load(chef), tile_size * 0.9, centre(board.chef()), 2.0);
+    spawn_piece(&mut commands, piece, from, tile_size);
 
     let title = match stage {
         Stage::Cooking => LEVELS[selected.0].name,

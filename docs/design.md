@@ -29,6 +29,7 @@ Success = a small playable game she wants to pick up, and every line of it is un
 - **Burnt:** the kitchen shows "Burnt!" and nothing moves any more. Undo does not help; the only way on is to restart the kitchen (or leave for the menu). A burnt kitchen never counts as solved.
 - **Safety nets:** unlimited undo (Z), restart (R). Restarting a burnt kitchen is a fresh start: the moves before it cannot be brought back.
 - **Twists:** conveyor belts, ice floors, bin (see below).
+- **Hazards:** flames, grease, mice (see below).
 
 ### Twists
 
@@ -38,7 +39,14 @@ Success = a small playable game she wants to pick up, and every line of it is un
 - The chef is never affected: they walk over ice, belts and the bin like floor. Standing in a belt's way blocks it.
 - A sliding or carried item combines, gets cooked or is binned by what it lands on, exactly as a pushed one.
 
-Everything happens within the move that caused it. `Board::step` has three phases: the chef walks, the item in the way is shoved (across ice, if any), then the conveyors run until nothing moves. When several items ride at once they are handled in a fixed order (top row first, left to right), and a ring of conveyors stops after a limited number of moves.
+### Hazards
+
+- **The stove and the flame are hot:** a chef who steps on either is burnt (see "Burnt" above).
+- **Flame:** an item that is pushed, slides or is carried into a flame burns away, as in the bin. Unlike the bin, the chef cannot walk across it.
+- **Grease:** the chef cannot stop on it. Stepping onto grease means taking another step the same way, and another, until the chef is off the grease or a step does not come off (a wall, a mouse, an item that will not move). Each of those steps is an ordinary one: it pushes what is in the way, and it burns the chef if it ends on something hot. Reaching over a stove ends the slide. Items are not affected by grease.
+- **Mouse:** runs to and fro along a row or a column, one square after each move of the chef. It turns round at walls, stoves, flames, the chef and other mice; if both ways are shut it waits. It eats the item on the square it runs onto, and any item that is pushed, slides or is carried onto its square, a dish on a hatch included. The chef cannot walk onto a mouse's square. A move that is not allowed does not count: the mice stay where they are.
+
+Everything happens within the move that caused it. `Board::step` has four phases: the chef walks (sliding on over grease), the item in the way is shoved (across ice, if any), then the conveyors run until nothing moves, and last the mice run, in the order they appear in the level file. When several items ride at once they are handled in a fixed order (top row first, left to right), and a ring of conveyors stops after a limited number of moves.
 
 ### Recipes
 
@@ -61,11 +69,13 @@ One character per square.
 | `/` `~` | chopping board, stove |
 | `^` `v` `<` `>` | conveyor going up, down, left, right |
 | `*` `x` | ice, bin |
+| `!` `%` | flame, grease |
+| `-` `\|` | mouse running side to side (first to the right), mouse running up and down (first down) |
 | `t` `d` `s` | tomato, chopped (diced) tomato, tomato soup |
 | `b` `c` `w` `g` | bread, cheese, sandwich, toastie (grilled) |
 | capital of an item letter | hatch that wants that item (`S` wants soup) |
 
-The chef can walk over chopping boards and hatches, but not over a stove. An item cannot start on a station or a hatch.
+The chef can walk over chopping boards and hatches, but not over a stove. An item or a mouse cannot start on a station or a hatch: it starts on plain floor.
 
 ## Architecture
 
@@ -105,7 +115,9 @@ push-kitchen/
 
 The sprites and sounds are original, made by the two scripts in `tools/`. To use other art or sounds (a Kenney pack, say), replace a file in `assets/` with one of the same name; no code changes.
 
-Sliding: the board does not track which item is which, so `Session` keeps the board from before the latest change and the view compares the two to see what moved. Anything that moved is drawn on its old square and slides to the new one in 0.12 s.
+Sliding: the board does not track which item is which, so `Session` keeps the board from before the latest change and the view compares the two to see what moved. Anything that moved is drawn on its old square and slides to the new one in 0.12 s. Mice are easier: the board always lists them in the same order. The mouse picture is turned so that its nose points the way it will run next.
+
+Sounds are chosen the same way, by comparing the two boards. The board also counts how many items the mice have eaten, so that a squeak can be told from an item dropping into the bin.
 
 `cargo run` finds `assets/` in the project folder. A binary started any other way looks for `assets/` next to itself.
 
@@ -168,6 +180,7 @@ Each milestone ends with something runnable.
 | 6 | Twists | Conveyors, ice, bin | iterators, refactoring `step` into phases |
 | 7 | Content | 12 kitchens, playtesting, web build playable in a browser | WebAssembly, `cfg` for per-platform code, build profiles |
 | 8 | Burning | The stove burns the chef, who reaches over it to push; a burnt kitchen can only be restarted | a flag in the state, const generics (`buttons`), an enum for the kitchen's stage |
+| 9 | Hazards | Flames, grease and mice | a `while` loop over a small enum (`Walk`), a `Vec` of structs in the state, a fourth phase in `step` |
 
 ## Verification
 

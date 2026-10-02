@@ -99,4 +99,10 @@ if __name__ == "__main__":
     # A long hiss over a falling tone: the chef on the stove.
     save("burnt", mix(noise(0.7, 0.3, decay=3.0, smooth=0.1), sweep(420, 90, 0.5, 0.3, decay=3.0)))
 
+    # Two short, high chirps: a mouse that has found something to eat.
+    chirp = sweep(2400, 3300, 0.06, 0.25, decay=2.0)
+    save("squeak", chirp + silence(0.04) + chirp)
+    # A falling whistle over a soft hiss: the chef sliding on grease.
+    save("slip", mix(sweep(900, 320, 0.22, 0.22, decay=2.5), noise(0.22, 0.08, decay=4.0, smooth=0.6)))
+
     print(f"sounds written to {OUT}")

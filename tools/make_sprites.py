@@ -134,6 +134,68 @@ def bin_():
     save(image, "bin")
 
 
+def flame():
+    image, draw = floor_canvas()
+    # Scorched floor, then three tongues of fire, each inside the last.
+    circle(draw, 256, 300, 190, (96, 84, 80, 255))
+    tongues = (
+        ((228, 66, 36, 255), 1.0),
+        ((250, 150, 44, 255), 0.7),
+        ((255, 226, 120, 255), 0.4),
+    )
+    for fill, size in tongues:
+        w, h = 150 * size, 330 * size
+        base = 430
+        draw.polygon(
+            (
+                (256, base - h),
+                (256 + w * 0.55, base - h * 0.45),
+                (256 + w * 0.95, base - h * 0.62),
+                (256 + w, base - h * 0.2),
+                (256 + w * 0.6, base),
+                (256 - w * 0.6, base),
+                (256 - w, base - h * 0.2),
+                (256 - w * 0.8, base - h * 0.7),
+                (256 - w * 0.45, base - h * 0.4),
+            ),
+            fill=fill,
+        )
+        circle(draw, 256, base - w * 0.45, w * 0.75, fill)
+    save(image, "flame")
+
+
+def grease():
+    image, draw = floor_canvas()
+    # A yellow-green puddle made of overlapping blobs, with a shine on it.
+    dark, light = (150, 150, 52, 255), (206, 204, 92, 255)
+    blobs = ((230, 250, 150), (330, 300, 120), (170, 330, 96), (320, 180, 90), (140, 200, 70))
+    for x, y, r in blobs:
+        circle(draw, x, y, r + 12, dark)
+    for x, y, r in blobs:
+        circle(draw, x, y, r, light)
+    draw.arc((150, 150, 330, 330), start=190, end=260, fill=(244, 244, 190, 255), width=16)
+    circle(draw, 344, 300, 16, (244, 244, 190, 255))
+    save(image, "grease")
+
+
+def mouse():
+    """Seen from above, running up. The game turns the picture for the other directions."""
+    image, draw = canvas()
+    grey, dark, pink = (158, 158, 170, 255), (92, 92, 106, 255), (246, 160, 170, 255)
+    # Tail, body, ears, then the head with its nose at the top.
+    draw.line((256, 400, 250, 450, 280, 480, 330, 484), fill=pink, width=16, joint="curve")
+    draw.ellipse((166, 170, 346, 420), fill=grey, outline=dark, width=12)
+    circle(draw, 176, 176, 52, grey, dark, 12)
+    circle(draw, 336, 176, 52, grey, dark, 12)
+    circle(draw, 176, 176, 24, pink)
+    circle(draw, 336, 176, 24, pink)
+    draw.polygon(((196, 190), (316, 190), (256, 40)), fill=grey, outline=dark, width=12)
+    circle(draw, 256, 52, 18, pink)
+    circle(draw, 228, 136, 11, INK)
+    circle(draw, 284, 136, 11, INK)
+    save(image, "mouse")
+
+
 def star(x, y, outer, inner, points=5):
     corners = []
     for i in range(points * 2):
@@ -259,7 +321,7 @@ def chef_burnt():
 
 
 if __name__ == "__main__":
-    for make in (floor, wall, chopping_board, stove, hatch, conveyor, ice, bin_,
+    for make in (floor, wall, chopping_board, stove, hatch, conveyor, ice, bin_, flame, grease, mouse,
                  tomato, chopped_tomato, tomato_soup, bread, cheese, sandwich, toastie, chef, chef_burnt):
         make()
     print(f"sprites written to {OUT}")
