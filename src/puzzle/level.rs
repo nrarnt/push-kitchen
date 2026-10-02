@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::board::Board;
-use super::types::{Item, Pos, Tile};
+use super::types::{Item, Pos, StationKind, Tile};
 
 /// Why a level file could not be turned into a `Board`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,9 +11,27 @@ pub enum LevelError {
     UnknownSymbol(char),
 }
 
+/// The item a lowercase letter stands for.
+fn item_for(symbol: char) -> Option<Item> {
+    match symbol {
+        't' => Some(Item::Tomato),
+        'd' => Some(Item::ChoppedTomato),
+        's' => Some(Item::TomatoSoup),
+        'b' => Some(Item::Bread),
+        'c' => Some(Item::Cheese),
+        'w' => Some(Item::Sandwich),
+        'g' => Some(Item::Toastie),
+        _ => None,
+    }
+}
+
 /// Builds a `Board` from a text drawing of a kitchen.
 ///
-/// `#` wall, `.` floor, `@` chef, `c` crate, `H` hatch, `C` crate on a hatch.
+/// `#` wall, `.` floor, `@` chef, `/` chopping board, `~` stove.
+///
+/// A lowercase letter is an item on the floor: `t` tomato, `d` chopped
+/// (diced) tomato, `s` tomato soup, `b` bread, `c` cheese, `w` sandwich,
+/// `g` toastie (grilled). Its capital is a hatch that wants that item.
 pub fn parse(text: &str) -> Result<Board, LevelError> {
     let lines: Vec<&str> = text.lines().collect();
     let width = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
@@ -30,7 +48,8 @@ pub fn parse(text: &str) -> Result<Board, LevelError> {
             let tile = match symbol {
                 '#' => Tile::Wall,
                 '.' => Tile::Floor,
-                'H' => Tile::Hatch,
+                '/' => Tile::Station(StationKind::ChoppingBoard),
+                '~' => Tile::Station(StationKind::Stove),
                 '@' => {
                     if chef.is_some() {
                         return Err(LevelError::ExtraChef);
@@ -38,15 +57,15 @@ pub fn parse(text: &str) -> Result<Board, LevelError> {
                     chef = Some(pos);
                     Tile::Floor
                 }
-                'c' => {
-                    items.insert(pos, Item::Crate);
-                    Tile::Floor
-                }
-                'C' => {
-                    items.insert(pos, Item::Crate);
-                    Tile::Hatch
-                }
-                other => return Err(LevelError::UnknownSymbol(other)),
+                // A letter: first try it as an item, then as the capital of one.
+                other => match (item_for(other), item_for(other.to_ascii_lowercase())) {
+                    (Some(item), _) => {
+                        items.insert(pos, item);
+                        Tile::Floor
+                    }
+                    (None, Some(dish)) => Tile::Hatch(dish),
+                    (None, None) => return Err(LevelError::UnknownSymbol(other)),
+                },
             };
             tiles[y * width + x] = tile;
         }
@@ -67,21 +86,48 @@ mod tests {
     }
 
     #[test]
-    fn parse_reads_walls_floor_and_hatches() {
-        let board = parse("#@.H").unwrap();
+    fn parse_reads_walls_and_floor() {
+        let board = parse("#@.").unwrap();
         assert_eq!(board.tile(Pos::new(0, 0)), Tile::Wall);
         assert_eq!(board.tile(Pos::new(1, 0)), Tile::Floor);
         assert_eq!(board.tile(Pos::new(2, 0)), Tile::Floor);
-        assert_eq!(board.tile(Pos::new(3, 0)), Tile::Hatch);
     }
 
     #[test]
-    fn parse_places_crates_on_floor_and_on_hatches() {
-        let board = parse("@cC").unwrap();
-        assert_eq!(board.item(Pos::new(1, 0)), Some(Item::Crate));
-        assert_eq!(board.tile(Pos::new(1, 0)), Tile::Floor);
-        assert_eq!(board.item(Pos::new(2, 0)), Some(Item::Crate));
-        assert_eq!(board.tile(Pos::new(2, 0)), Tile::Hatch);
+    fn parse_reads_stations() {
+        let board = parse("@/~").unwrap();
+        assert_eq!(
+            board.tile(Pos::new(1, 0)),
+            Tile::Station(StationKind::ChoppingBoard)
+        );
+        assert_eq!(board.tile(Pos::new(2, 0)), Tile::Station(StationKind::Stove));
+    }
+
+    #[test]
+    fn parse_places_a_lowercase_letter_as_an_item_on_floor() {
+        let board = parse("@tdsbcwg").unwrap();
+        let expected = [
+            Item::Tomato,
+            Item::ChoppedTomato,
+            Item::TomatoSoup,
+            Item::Bread,
+            Item::Cheese,
+            Item::Sandwich,
+            Item::Toastie,
+        ];
+        for (i, item) in expected.into_iter().enumerate() {
+            let pos = Pos::new(i as i32 + 1, 0);
+            assert_eq!(board.item(pos), Some(item));
+            assert_eq!(board.tile(pos), Tile::Floor);
+        }
+    }
+
+    #[test]
+    fn parse_reads_a_capital_letter_as_a_hatch_wanting_that_item() {
+        let board = parse("@SG").unwrap();
+        assert_eq!(board.tile(Pos::new(1, 0)), Tile::Hatch(Item::TomatoSoup));
+        assert_eq!(board.tile(Pos::new(2, 0)), Tile::Hatch(Item::Toastie));
+        assert_eq!(board.item(Pos::new(1, 0)), None);
     }
 
     #[test]
@@ -105,5 +151,10 @@ mod tests {
     #[test]
     fn unknown_symbol_is_rejected() {
         assert_eq!(parse("@?"), Err(LevelError::UnknownSymbol('?')));
+    }
+
+    #[test]
+    fn a_capital_letter_that_is_no_item_is_rejected() {
+        assert_eq!(parse("@X"), Err(LevelError::UnknownSymbol('X')));
     }
 }

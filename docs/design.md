@@ -28,6 +28,31 @@ Success = a small playable game she wants to pick up, and every line of it is un
 - **Safety nets:** unlimited undo (Z), restart (R).
 - **Twists (later):** conveyor belts, ice floors, bin.
 
+### Recipes
+
+| Where | From | To |
+|---|---|---|
+| Chopping board | tomato | chopped tomato |
+| Stove | chopped tomato | tomato soup |
+| Stove | sandwich | toastie |
+| Pushed together | bread + cheese (either order) | sandwich |
+
+Items pushed together end up on the square of the one that was standing still. If that square is a station, the result is cooked by it straight away (bread pushed into cheese resting on a stove gives a toastie).
+
+### Level files
+
+One character per square.
+
+| Symbol | Meaning |
+|---|---|
+| `#` `.` `@` | wall, floor, chef |
+| `/` `~` | chopping board, stove |
+| `t` `d` `s` | tomato, chopped (diced) tomato, tomato soup |
+| `b` `c` `w` `g` | bread, cheese, sandwich, toastie (grilled) |
+| capital of an item letter | hatch that wants that item (`S` wants soup) |
+
+The chef can walk over stations and hatches. An item cannot start on a station or a hatch.
+
 ## Architecture
 
 Two layers with a one-way dependency: Bevy code knows the puzzle core, the core knows nothing about Bevy.
@@ -35,7 +60,7 @@ Two layers with a one-way dependency: Bevy code knows the puzzle core, the core 
 ```
 push-kitchen/
   Cargo.toml              bevy 0.19, dev-profile speedups
-  assets/levels/*.txt     ASCII kitchens (# wall, @ chef, T tomato, ...)
+  assets/levels/*.txt     ASCII kitchens (# wall, @ chef, t tomato, ...)
   src/
     main.rs               builds the Bevy App, registers plugins
     puzzle/               PURE RUST, unit tested, no Bevy imports

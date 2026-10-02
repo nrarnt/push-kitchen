@@ -34,14 +34,29 @@ pub enum Dir {
 pub enum Tile {
     Floor,
     Wall,
-    /// Serving hatch: the level is solved when every hatch holds an item.
-    Hatch,
+    /// Floor that cooks: an item landing here may be turned into another.
+    Station(StationKind),
+    /// Serving hatch, carrying the dish it wants. The level is solved when
+    /// every hatch holds its dish.
+    Hatch(Item),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StationKind {
+    ChoppingBoard,
+    Stove,
 }
 
 /// Something the chef can push.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
-    Crate,
+    Tomato,
+    ChoppedTomato,
+    TomatoSoup,
+    Bread,
+    Cheese,
+    Sandwich,
+    Toastie,
 }
 
 #[cfg(test)]

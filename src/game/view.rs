@@ -1,13 +1,17 @@
 use bevy::prelude::*;
 
 use super::session::Session;
-use crate::puzzle::{Item, Pos, Tile};
+use crate::puzzle::{Item, Pos, StationKind, Tile};
 
 /// Side of one grid square, in pixels.
 const TILE_SIZE: f32 = 64.0;
+/// How much of its square an item fills.
+const ITEM_SCALE: f32 = 0.7;
 
 pub const BACKGROUND: Color = Color::srgb(0.10, 0.10, 0.13);
 const CHEF: Color = Color::srgb(0.95, 0.95, 0.98);
+const DARK_TEXT: Color = Color::srgb(0.12, 0.12, 0.14);
+const LIGHT_TEXT: Color = Color::srgb(0.96, 0.96, 0.96);
 
 /// Marks everything `draw_board` put on screen, so it can be cleared again.
 #[derive(Component)]
@@ -17,13 +21,40 @@ fn tile_colour(tile: Tile) -> Color {
     match tile {
         Tile::Floor => Color::srgb(0.87, 0.82, 0.72),
         Tile::Wall => Color::srgb(0.24, 0.26, 0.32),
-        Tile::Hatch => Color::srgb(0.45, 0.75, 0.50),
+        Tile::Station(StationKind::ChoppingBoard) => Color::srgb(0.58, 0.42, 0.28),
+        Tile::Station(StationKind::Stove) => Color::srgb(0.30, 0.42, 0.60),
+        Tile::Hatch(_) => Color::srgb(0.94, 0.94, 0.90),
+    }
+}
+
+fn station_name(station: StationKind) -> &'static str {
+    match station {
+        StationKind::ChoppingBoard => "chop",
+        StationKind::Stove => "stove",
     }
 }
 
 fn item_colour(item: Item) -> Color {
     match item {
-        Item::Crate => Color::srgb(0.62, 0.42, 0.24),
+        Item::Tomato => Color::srgb(0.88, 0.22, 0.18),
+        Item::ChoppedTomato => Color::srgb(0.96, 0.50, 0.45),
+        Item::TomatoSoup => Color::srgb(0.96, 0.58, 0.16),
+        Item::Bread => Color::srgb(0.90, 0.76, 0.52),
+        Item::Cheese => Color::srgb(0.98, 0.86, 0.26),
+        Item::Sandwich => Color::srgb(0.80, 0.62, 0.36),
+        Item::Toastie => Color::srgb(0.66, 0.44, 0.20),
+    }
+}
+
+fn item_name(item: Item) -> &'static str {
+    match item {
+        Item::Tomato => "tomato",
+        Item::ChoppedTomato => "chopped",
+        Item::TomatoSoup => "soup",
+        Item::Bread => "bread",
+        Item::Cheese => "cheese",
+        Item::Sandwich => "sandwich",
+        Item::Toastie => "toastie",
     }
 }
 
@@ -39,6 +70,21 @@ fn square_centre(pos: Pos, width: i32, height: i32) -> Vec2 {
 fn square(colour: Color, scale: f32, centre: Vec2, layer: f32) -> (Sprite, Transform) {
     (
         Sprite::from_color(colour, Vec2::splat(TILE_SIZE * scale)),
+        Transform::from_translation(centre.extend(layer)),
+    )
+}
+
+/// Small text in the middle of a grid square.
+fn label(
+    text: &str,
+    colour: Color,
+    centre: Vec2,
+    layer: f32,
+) -> (Text2d, TextFont, TextColor, Transform) {
+    (
+        Text2d::new(text),
+        TextFont::from_font_size(11.0),
+        TextColor(colour),
         Transform::from_translation(centre.extend(layer)),
     )
 }
@@ -69,9 +115,26 @@ pub fn draw_board(mut commands: Commands, session: Res<Session>, drawn: Query<En
         for x in 0..width {
             let pos = Pos::new(x, y);
             let centre = square_centre(pos, width, height);
-            commands.spawn((Drawn, square(tile_colour(board.tile(pos)), 0.96, centre, 0.0)));
+
+            let tile = board.tile(pos);
+            commands.spawn((Drawn, square(tile_colour(tile), 0.96, centre, 0.0)));
+            match tile {
+                Tile::Station(station) => {
+                    commands.spawn((Drawn, label(station_name(station), LIGHT_TEXT, centre, 0.3)));
+                }
+                Tile::Hatch(dish) => {
+                    // A frame in the colour of the wanted dish, with a hole
+                    // the dish fits into exactly.
+                    commands.spawn((Drawn, square(item_colour(dish), 0.86, centre, 0.1)));
+                    commands.spawn((Drawn, square(tile_colour(tile), ITEM_SCALE, centre, 0.2)));
+                    commands.spawn((Drawn, label(item_name(dish), DARK_TEXT, centre, 0.3)));
+                }
+                Tile::Floor | Tile::Wall => {}
+            }
+
             if let Some(item) = board.item(pos) {
-                commands.spawn((Drawn, square(item_colour(item), 0.7, centre, 1.0)));
+                commands.spawn((Drawn, square(item_colour(item), ITEM_SCALE, centre, 1.0)));
+                commands.spawn((Drawn, label(item_name(item), DARK_TEXT, centre, 1.1)));
             }
         }
     }

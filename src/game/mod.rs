@@ -61,9 +61,14 @@ mod tests {
     fn first_level_can_be_solved() {
         use Dir::*;
         let solution = [
-            Right, Right, Right, // first crate onto the top hatch
-            Down, Left, Left, Down, Right, Right, // second crate along its row
-            Up, Right, Down, // and down onto the bottom hatch
+            // Bread into cheese, the sandwich onto the stove, the toastie down to its hatch.
+            Up, Up, Right, Right, Right, Right, Up, Right, Down, Down,
+            // Round to the tomato and push it onto the chopping board.
+            Left, Left, Left, Left, Left, Up, Up, Up, Right, Right, Right, Right,
+            // Chopped tomato down over the stove.
+            Up, Right, Down, Down, Down,
+            // Soup left, then down to its hatch.
+            Right, Down, Left, Left, Up, Left, Down,
         ];
         let mut board = first_level();
         for dir in solution {
@@ -86,11 +91,11 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ArrowDown);
+            .press(KeyCode::ArrowUp);
         app.update();
 
         let chef = app.world().resource::<Session>().board().chef();
-        assert_eq!(chef, Pos::new(start.x, start.y + 1));
+        assert_eq!(chef, Pos::new(start.x, start.y - 1));
     }
 
     #[test]
@@ -100,7 +105,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ArrowDown);
+            .press(KeyCode::ArrowUp);
         app.update();
 
         assert_eq!(drawn_count(&mut app), before);
