@@ -63,6 +63,9 @@ impl Board {
 
     /// The board after the chef tries to move one square in `dir`,
     /// or `None` if the move is not allowed.
+    ///
+    /// A move has three phases: the chef walks, the item in the way (if any)
+    /// is shoved, and then the conveyors run.
     pub fn step(&self, dir: Dir) -> Option<Board> {
         let dest = self.chef.step(dir);
         if self.tile(dest) == Tile::Wall {
@@ -70,26 +73,83 @@ impl Board {
         }
 
         let mut next = self.clone();
-        if let Some(pushed) = next.items.remove(&dest) {
-            // The chef walks into an item and shoves it one square further.
-            let beyond = dest.step(dir);
-            if self.tile(beyond) == Tile::Wall {
-                return None;
-            }
-            // An item already there blocks the push, unless the two combine.
-            let landed = match self.item(beyond) {
-                Some(waiting) => combine(pushed, waiting)?,
-                None => pushed,
-            };
-            // A station cooks what lands on it, if it has a use for it.
-            let landed = match self.tile(beyond) {
-                Tile::Station(station) => transform(station, landed).unwrap_or(landed),
-                _ => landed,
-            };
-            next.items.insert(beyond, landed);
-        }
         next.chef = dest;
+        // If the item in the way will not budge, neither does the chef.
+        if next.item(dest).is_some() && !next.shove(dest, dir) {
+            return None;
+        }
+        next.run_conveyors();
         Some(next)
+    }
+
+    /// Moves the item on `from` one square in `dir`, if nothing is in the way.
+    /// What it lands on may combine with it, cook it or swallow it.
+    fn advance(&mut self, from: Pos, dir: Dir) -> bool {
+        let to = from.step(dir);
+        if self.tile(to) == Tile::Wall || to == self.chef {
+            return false;
+        }
+        let Some(moving) = self.item(from) else {
+            return false;
+        };
+        // An item already there blocks the way, unless the two combine.
+        let landed = match self.item(to) {
+            Some(waiting) => match combine(moving, waiting) {
+                Some(combined) => combined,
+                None => return false,
+            },
+            None => moving,
+        };
+
+        self.items.remove(&from);
+        match self.tile(to) {
+            Tile::Bin => {}
+            Tile::Station(station) => {
+                self.items.insert(to, transform(station, landed).unwrap_or(landed));
+            }
+            _ => {
+                self.items.insert(to, landed);
+            }
+        }
+        true
+    }
+
+    /// Pushes the item on `from` one square in `dir`, and on across any ice.
+    /// Returns false if it could not move at all.
+    fn shove(&mut self, from: Pos, dir: Dir) -> bool {
+        let mut pos = from;
+        while self.advance(pos, dir) {
+            pos = pos.step(dir);
+            if self.tile(pos) != Tile::Ice {
+                break;
+            }
+        }
+        pos != from
+    }
+
+    /// Lets the conveyors carry what is on them, until nothing more can move.
+    fn run_conveyors(&mut self) {
+        // A ring of conveyors would carry an item round forever, so the
+        // number of moves is limited.
+        for _ in 0..self.width * self.height {
+            let mut riders: Vec<(Pos, Dir)> = self
+                .items
+                .keys()
+                .filter_map(|&pos| match self.tile(pos) {
+                    Tile::Conveyor(dir) => Some((pos, dir)),
+                    _ => None,
+                })
+                .collect();
+            // Always in the same order: a `HashMap` hands out its keys in a
+            // different order each run, and two items heading for the same
+            // square must not race.
+            riders.sort_by_key(|(pos, _)| (pos.y, pos.x));
+
+            let moved = riders.into_iter().any(|(pos, dir)| self.shove(pos, dir));
+            if !moved {
+                return;
+            }
+        }
     }
 
     /// True when every hatch holds the dish it wants.
@@ -216,6 +276,109 @@ mod tests {
 
         let after = before.step(Dir::Right).expect("push should be allowed");
         assert_eq!(after.item(Pos::new(2, 0)), Some(Item::Toastie));
+    }
+
+    #[test]
+    fn chef_walks_over_ice_a_conveyor_and_the_bin_like_floor() {
+        for text in ["#@*.#", "#@>.#", "#@<.#", "#@x.#"] {
+            assert_eq!(pushed_right(text).chef(), Pos::new(2, 0), "{text}");
+        }
+    }
+
+    #[test]
+    fn item_pushed_onto_ice_slides_until_it_leaves_the_ice() {
+        let after = pushed_right("#@t**..#");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert_eq!(after.item(Pos::new(5, 0)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn sliding_item_stops_against_a_wall() {
+        let after = pushed_right("#@t**#");
+        assert_eq!(after.item(Pos::new(4, 0)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn sliding_item_stops_against_an_item_it_has_no_recipe_with() {
+        let after = pushed_right("#@t**b#");
+        assert_eq!(after.item(Pos::new(4, 0)), Some(Item::Tomato));
+        assert_eq!(after.item(Pos::new(5, 0)), Some(Item::Bread));
+    }
+
+    #[test]
+    fn sliding_item_combines_with_its_partner() {
+        let after = pushed_right("#@b**c#");
+        assert_eq!(after.item(Pos::new(5, 0)), Some(Item::Sandwich));
+        assert_eq!(after.items().count(), 1);
+    }
+
+    #[test]
+    fn conveyor_carries_an_item_to_its_end() {
+        let after = pushed_right("#@t>>..#");
+        assert_eq!(after.item(Pos::new(5, 0)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn conveyor_can_turn_a_corner() {
+        let after = pushed_right("@t>v\n....");
+        assert_eq!(after.item(Pos::new(3, 1)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn conveyor_carries_an_item_onto_a_station_to_be_cooked() {
+        let after = pushed_right("#@t>/#");
+        assert_eq!(after.item(Pos::new(4, 0)), Some(Item::ChoppedTomato));
+    }
+
+    #[test]
+    fn item_leaving_a_conveyor_onto_ice_keeps_sliding() {
+        let after = pushed_right("#@t>**.#");
+        assert_eq!(after.item(Pos::new(6, 0)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn conveyor_cannot_carry_an_item_into_another() {
+        let after = pushed_right("#@t>b#");
+        assert_eq!(after.item(Pos::new(3, 0)), Some(Item::Tomato));
+        assert_eq!(after.item(Pos::new(4, 0)), Some(Item::Bread));
+    }
+
+    #[test]
+    fn conveyor_cannot_carry_an_item_into_the_chef() {
+        // The belt points back at the square the chef has just stepped onto.
+        let after = pushed_right("#@t<#");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert_eq!(after.item(Pos::new(3, 0)), Some(Item::Tomato));
+    }
+
+    #[test]
+    fn item_waiting_on_a_conveyor_rides_on_once_the_way_is_clear() {
+        let start = board(".....\n@t>b.\n.....");
+        // The tomato goes onto the belt and waits behind the bread.
+        let waiting = start.step(Dir::Right).unwrap();
+        assert_eq!(waiting.item(Pos::new(2, 1)), Some(Item::Tomato));
+
+        // Round the bottom, push the bread up, and step out of the way.
+        let moves = [Dir::Down, Dir::Right, Dir::Right, Dir::Up, Dir::Right];
+        let mut after = waiting;
+        for dir in moves {
+            after = after.step(dir).expect("move should be allowed");
+        }
+        assert_eq!(after.item(Pos::new(3, 1)), Some(Item::Tomato));
+        assert_eq!(after.item(Pos::new(3, 0)), Some(Item::Bread));
+    }
+
+    #[test]
+    fn a_ring_of_conveyors_does_not_run_forever() {
+        let after = pushed_right("@t>v\n..^<");
+        assert_eq!(after.items().count(), 1);
+    }
+
+    #[test]
+    fn the_bin_swallows_an_item() {
+        let after = pushed_right("#@tx#");
+        assert_eq!(after.chef(), Pos::new(2, 0));
+        assert_eq!(after.items().count(), 0);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::board::Board;
-use super::types::{Item, Pos, StationKind, Tile};
+use super::types::{Dir, Item, Pos, StationKind, Tile};
 
 /// Why a level file could not be turned into a `Board`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +27,8 @@ fn item_for(symbol: char) -> Option<Item> {
 
 /// Builds a `Board` from a text drawing of a kitchen.
 ///
-/// `#` wall, `.` floor, `@` chef, `/` chopping board, `~` stove.
+/// `#` wall, `.` floor, `@` chef, `/` chopping board, `~` stove,
+/// `^` `v` `<` `>` conveyors, `*` ice, `x` bin.
 ///
 /// A lowercase letter is an item on the floor: `t` tomato, `d` chopped
 /// (diced) tomato, `s` tomato soup, `b` bread, `c` cheese, `w` sandwich,
@@ -50,6 +51,12 @@ pub fn parse(text: &str) -> Result<Board, LevelError> {
                 '.' => Tile::Floor,
                 '/' => Tile::Station(StationKind::ChoppingBoard),
                 '~' => Tile::Station(StationKind::Stove),
+                '^' => Tile::Conveyor(Dir::Up),
+                'v' => Tile::Conveyor(Dir::Down),
+                '<' => Tile::Conveyor(Dir::Left),
+                '>' => Tile::Conveyor(Dir::Right),
+                '*' => Tile::Ice,
+                'x' => Tile::Bin,
                 '@' => {
                     if chef.is_some() {
                         return Err(LevelError::ExtraChef);
@@ -101,6 +108,22 @@ mod tests {
             Tile::Station(StationKind::ChoppingBoard)
         );
         assert_eq!(board.tile(Pos::new(2, 0)), Tile::Station(StationKind::Stove));
+    }
+
+    #[test]
+    fn parse_reads_conveyors_with_their_direction() {
+        let board = parse("@^v<>").unwrap();
+        assert_eq!(board.tile(Pos::new(1, 0)), Tile::Conveyor(Dir::Up));
+        assert_eq!(board.tile(Pos::new(2, 0)), Tile::Conveyor(Dir::Down));
+        assert_eq!(board.tile(Pos::new(3, 0)), Tile::Conveyor(Dir::Left));
+        assert_eq!(board.tile(Pos::new(4, 0)), Tile::Conveyor(Dir::Right));
+    }
+
+    #[test]
+    fn parse_reads_ice_and_the_bin() {
+        let board = parse("@*x").unwrap();
+        assert_eq!(board.tile(Pos::new(1, 0)), Tile::Ice);
+        assert_eq!(board.tile(Pos::new(2, 0)), Tile::Bin);
     }
 
     #[test]

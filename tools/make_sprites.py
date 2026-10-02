@@ -107,6 +107,33 @@ def hatch():
     save(image, "hatch")
 
 
+def conveyor():
+    """Pointing up. The game turns the picture for the other directions."""
+    image, draw = canvas((58, 60, 72, 255))
+    draw.rectangle((0, 0, 52, BIG), fill=(124, 130, 146, 255))
+    draw.rectangle((BIG - 52, 0, BIG, BIG), fill=(124, 130, 146, 255))
+    draw.rectangle((64, 0, BIG - 64, BIG), fill=(82, 86, 100, 255))
+    for y in (96, 226, 356):
+        draw.line((150, y + 70, 256, y, 362, y + 70), fill=(250, 202, 72, 255), width=32, joint="curve")
+    save(image, "conveyor")
+
+
+def ice():
+    image, draw = canvas((178, 220, 242, 255))
+    draw.rounded_rectangle((8, 8, BIG - 8, BIG - 8), radius=28, fill=(208, 238, 252, 255))
+    for x, y, length in ((90, 200, 130), (150, 250, 70), (300, 390, 120), (330, 110, 60)):
+        draw.line((x, y, x + length, y - length), fill=(248, 253, 255, 255), width=16)
+    save(image, "ice")
+
+
+def bin_():
+    image, draw = floor_canvas()
+    circle(draw, 256, 256, 200, (126, 132, 148, 255), (60, 64, 78, 255), 12)
+    circle(draw, 256, 256, 146, (34, 36, 46, 255))
+    draw.arc((126, 126, 386, 386), start=200, end=260, fill=(70, 74, 90, 255), width=14)
+    save(image, "bin")
+
+
 def star(x, y, outer, inner, points=5):
     corners = []
     for i in range(points * 2):
@@ -213,7 +240,7 @@ def chef():
 
 
 if __name__ == "__main__":
-    for make in (floor, wall, chopping_board, stove, hatch, tomato, chopped_tomato,
-                 tomato_soup, bread, cheese, sandwich, toastie, chef):
+    for make in (floor, wall, chopping_board, stove, hatch, conveyor, ice, bin_,
+                 tomato, chopped_tomato, tomato_soup, bread, cheese, sandwich, toastie, chef):
         make()
     print(f"sprites written to {OUT}")

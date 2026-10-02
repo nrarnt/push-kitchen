@@ -38,6 +38,21 @@ pub const LEVELS: &[Level] = &[
         name: "Lunch rush",
         text: include_str!("../../assets/levels/lunch_rush.txt"),
     },
+    Level {
+        id: "conveyor",
+        name: "Conveyor",
+        text: include_str!("../../assets/levels/conveyor.txt"),
+    },
+    Level {
+        id: "slippery-floor",
+        name: "Slippery floor",
+        text: include_str!("../../assets/levels/slippery_floor.txt"),
+    },
+    Level {
+        id: "leftovers",
+        name: "Leftovers",
+        text: include_str!("../../assets/levels/leftovers.txt"),
+    },
 ];
 
 #[cfg(test)]

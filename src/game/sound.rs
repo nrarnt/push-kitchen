@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::puzzle::{Board, Dir, StationKind, Tile};
+use crate::puzzle::{Board, Item};
 
 /// A sound effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,6 +10,8 @@ pub enum Sfx {
     Chop,
     Sizzle,
     Combine,
+    /// An item dropping into the bin.
+    Bin,
     /// Walking into something that will not move.
     Bump,
     Solved,
@@ -23,13 +25,14 @@ fn file(sfx: Sfx) -> &'static str {
         Sfx::Chop => "sounds/chop.wav",
         Sfx::Sizzle => "sounds/sizzle.wav",
         Sfx::Combine => "sounds/combine.wav",
+        Sfx::Bin => "sounds/bin.wav",
         Sfx::Bump => "sounds/bump.wav",
         Sfx::Solved => "sounds/solved.wav",
     }
 }
 
-/// The sound of the move in `dir` that turned `before` into `after`.
-pub fn sound_of_move(before: &Board, after: &Board, dir: Dir) -> Sfx {
+/// The sound of the chef's move that turned `before` into `after`.
+pub fn sound_of_move(before: &Board, after: &Board) -> Sfx {
     if after.is_solved() && !before.is_solved() {
         return Sfx::Solved;
     }
@@ -37,18 +40,18 @@ pub fn sound_of_move(before: &Board, after: &Board, dir: Dir) -> Sfx {
     let Some(pushed) = before.item(after.chef()) else {
         return Sfx::Step;
     };
+    // Where did it end up? Look for an item that was not there before.
+    let landed = after
+        .items()
+        .find(|&(pos, item)| before.item(pos) != Some(item));
 
-    let beyond = after.chef().step(dir);
-    if before.item(beyond).is_some() {
-        Sfx::Combine
-    } else if after.item(beyond) == Some(pushed) {
-        Sfx::Push
-    } else {
-        // The item changed as it landed, so a station cooked it.
-        match after.tile(beyond) {
-            Tile::Station(StationKind::ChoppingBoard) => Sfx::Chop,
-            _ => Sfx::Sizzle,
-        }
+    match landed {
+        None => Sfx::Bin,
+        Some(_) if after.items().count() < before.items().count() => Sfx::Combine,
+        Some((_, item)) if item == pushed => Sfx::Push,
+        // It changed on the way, so a station cooked it.
+        Some((_, Item::ChoppedTomato)) => Sfx::Chop,
+        Some(_) => Sfx::Sizzle,
     }
 }
 
@@ -62,13 +65,13 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::puzzle::parse;
+    use crate::puzzle::{Dir, parse};
 
     /// The sound of pushing right once from `text`.
     fn sound_of_right(text: &str) -> Sfx {
         let before = parse(text).expect("test level should parse");
         let after = before.step(Dir::Right).expect("move should be allowed");
-        sound_of_move(&before, &after, Dir::Right)
+        sound_of_move(&before, &after)
     }
 
     #[test]
@@ -102,6 +105,21 @@ mod tests {
     }
 
     #[test]
+    fn an_item_sliding_over_ice_is_just_a_push() {
+        assert_eq!(sound_of_right("#@t**..#"), Sfx::Push);
+    }
+
+    #[test]
+    fn a_conveyor_carrying_a_tomato_to_the_chopping_board_chops() {
+        assert_eq!(sound_of_right("#@t>/#"), Sfx::Chop);
+    }
+
+    #[test]
+    fn an_item_dropping_into_the_bin_sounds_binned() {
+        assert_eq!(sound_of_right("#@tx#"), Sfx::Bin);
+    }
+
+    #[test]
     fn the_move_that_solves_the_level_sounds_solved() {
         assert_eq!(sound_of_right("#@tT#"), Sfx::Solved);
     }
@@ -110,7 +128,7 @@ mod tests {
     fn walking_about_a_solved_level_is_just_steps() {
         let solved = parse("#@tT.#").unwrap().step(Dir::Right).unwrap();
         let after = solved.step(Dir::Left).unwrap();
-        assert_eq!(sound_of_move(&solved, &after, Dir::Left), Sfx::Step);
+        assert_eq!(sound_of_move(&solved, &after), Sfx::Step);
     }
 
     #[test]
@@ -121,6 +139,7 @@ mod tests {
             Sfx::Chop,
             Sfx::Sizzle,
             Sfx::Combine,
+            Sfx::Bin,
             Sfx::Bump,
             Sfx::Solved,
         ];

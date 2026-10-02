@@ -26,7 +26,17 @@ Success = a small playable game she wants to pick up, and every line of it is un
 - **Combining:** pushing item A into item B merges them if a recipe exists (bread + cheese → sandwich); otherwise the push is blocked.
 - **Winning:** each hatch shows the dish it wants; solved when every hatch holds its dish.
 - **Safety nets:** unlimited undo (Z), restart (R).
-- **Twists (later):** conveyor belts, ice floors, bin.
+- **Twists:** conveyor belts, ice floors, bin (see below).
+
+### Twists
+
+- **Ice:** an item pushed onto ice keeps sliding the same way until it leaves the ice or something stops it.
+- **Conveyor:** an item on a conveyor is carried in the belt's direction, square after square, until it leaves the belt or is blocked. A blocked item rides on as soon as the way is clear. An item carried onto ice keeps sliding.
+- **Bin:** an item that lands on the bin is gone.
+- The chef is never affected: they walk over ice, belts and the bin like floor. Standing in a belt's way blocks it.
+- A sliding or carried item combines, gets cooked or is binned by what it lands on, exactly as a pushed one.
+
+Everything happens within the move that caused it. `Board::step` has three phases: the chef walks, the item in the way is shoved (across ice, if any), then the conveyors run until nothing moves. When several items ride at once they are handled in a fixed order (top row first, left to right), and a ring of conveyors stops after a limited number of moves.
 
 ### Recipes
 
@@ -47,6 +57,8 @@ One character per square.
 |---|---|
 | `#` `.` `@` | wall, floor, chef |
 | `/` `~` | chopping board, stove |
+| `^` `v` `<` `>` | conveyor going up, down, left, right |
+| `*` `x` | ice, bin |
 | `t` `d` `s` | tomato, chopped (diced) tomato, tomato soup |
 | `b` `c` `w` `g` | bread, cheese, sandwich, toastie (grilled) |
 | capital of an item letter | hatch that wants that item (`S` wants soup) |

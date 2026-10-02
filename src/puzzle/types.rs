@@ -39,6 +39,12 @@ pub enum Tile {
     /// Serving hatch, carrying the dish it wants. The level is solved when
     /// every hatch holds its dish.
     Hatch(Item),
+    /// Carries an item on it one square in its direction, again and again.
+    Conveyor(Dir),
+    /// An item pushed onto ice keeps sliding the way it was going.
+    Ice,
+    /// An item that lands here is gone.
+    Bin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -93,4 +93,7 @@ if __name__ == "__main__":
     notes = [523.25, 659.25, 783.99, 1046.5]
     save("solved", mix(*(silence(0.11 * i) + bell(hz, 0.6, 0.22) for i, hz in enumerate(notes))))
 
+    # Last, so that adding it left the noise in the files above unchanged.
+    save("bin", mix(sweep(260, 70, 0.2, 0.4, decay=4.0), noise(0.2, 0.12, decay=6.0, smooth=0.6)))
+
     print(f"sounds written to {OUT}")

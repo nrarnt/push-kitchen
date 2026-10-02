@@ -54,7 +54,7 @@ pub fn handle_input(
         Some(Command::Move(dir)) => {
             session.step(dir);
             let sfx = match session.previous() {
-                Some(before) => sound_of_move(before, session.board(), dir),
+                Some(before) => sound_of_move(before, session.board()),
                 // Nothing changed: the chef walked into something solid.
                 None => Sfx::Bump,
             };

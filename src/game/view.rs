@@ -24,6 +24,21 @@ fn tile_sprite(tile: Tile) -> &'static str {
         Tile::Station(StationKind::ChoppingBoard) => "sprites/chopping_board.png",
         Tile::Station(StationKind::Stove) => "sprites/stove.png",
         Tile::Hatch(_) => "sprites/hatch.png",
+        Tile::Conveyor(_) => "sprites/conveyor.png",
+        Tile::Ice => "sprites/ice.png",
+        Tile::Bin => "sprites/bin.png",
+    }
+}
+
+/// How far to turn the conveyor picture, which is drawn pointing up.
+/// Bevy turns anticlockwise, in radians.
+fn conveyor_turn(dir: Dir) -> f32 {
+    use std::f32::consts::PI;
+    match dir {
+        Dir::Up => 0.0,
+        Dir::Left => PI / 2.0,
+        Dir::Down => PI,
+        Dir::Right => -PI / 2.0,
     }
 }
 
@@ -95,10 +110,12 @@ pub struct Slide {
 
 impl Slide {
     fn new(from: Vec2, to: Vec2) -> Self {
+        // A longer way takes longer, so everything slides at the same speed.
+        let squares = (from.distance(to) / TILE_SIZE).max(1.0);
         Slide {
             from,
             to,
-            timer: Timer::from_seconds(SLIDE_SECONDS, TimerMode::Once),
+            timer: Timer::from_seconds(squares * SLIDE_SECONDS, TimerMode::Once),
         }
     }
 
@@ -120,18 +137,21 @@ pub fn slide(time: Res<Time>, mut sliding: Query<(&mut Slide, &mut Transform)>) 
     }
 }
 
-/// The square the item now on `pos` was pushed from, if the change from
-/// `before` to `after` moved it there.
+/// The square the item now on `pos` came from, if the change from `before`
+/// to `after` moved it there.
+///
+/// The board does not know which item is which, so this is a guess: the
+/// nearest other square whose item is gone or different now.
 fn item_origin(before: &Board, after: &Board, pos: Pos) -> Option<Pos> {
     if before.item(pos) == after.item(pos) {
         // Same item as before: it never moved.
         return None;
     }
-    // It came from a neighbouring square whose item is gone or different now.
-    [Dir::Up, Dir::Down, Dir::Left, Dir::Right]
-        .into_iter()
-        .map(|dir| pos.step(dir))
-        .find(|&near| before.item(near).is_some() && before.item(near) != after.item(near))
+    before
+        .items()
+        .filter(|&(from, item)| from != pos && after.item(from) != Some(item))
+        .map(|(from, _)| from)
+        .min_by_key(|from| (from.x - pos.x).abs() + (from.y - pos.y).abs())
 }
 
 /// Draws something that can move. It belongs on `to`; if it was on `from` a
@@ -177,7 +197,12 @@ pub fn draw_board(
         for x in 0..width {
             let pos = Pos::new(x, y);
             let tile = board.tile(pos);
-            commands.spawn((Drawn, picture(assets.load(tile_sprite(tile)), 1.0, centre(pos), 0.0)));
+            let (sprite, mut transform) =
+                picture(assets.load(tile_sprite(tile)), 1.0, centre(pos), 0.0);
+            if let Tile::Conveyor(dir) = tile {
+                transform.rotate_z(conveyor_turn(dir));
+            }
+            commands.spawn((Drawn, sprite, transform));
 
             if let Tile::Hatch(dish) = tile {
                 // A faint picture of the dish this hatch wants.
@@ -271,6 +296,22 @@ mod tests {
     }
 
     #[test]
+    fn a_slide_over_several_squares_takes_that_much_longer() {
+        let slide = Slide::new(Vec2::ZERO, Vec2::new(3.0 * TILE_SIZE, 0.0));
+        assert_eq!(
+            slide.timer.duration(),
+            Duration::from_secs_f32(3.0 * SLIDE_SECONDS)
+        );
+    }
+
+    #[test]
+    fn an_item_that_slid_far_comes_from_where_it_started() {
+        let before = board("#@t**..#");
+        let after = before.step(Dir::Right).unwrap();
+        assert_eq!(item_origin(&before, &after, Pos::new(5, 0)), Some(Pos::new(2, 0)));
+    }
+
+    #[test]
     fn a_pushed_item_comes_from_the_square_the_chef_took() {
         let before = board("#@t.#");
         let after = before.step(Dir::Right).unwrap();
@@ -324,6 +365,9 @@ mod tests {
             Tile::Station(StationKind::ChoppingBoard),
             Tile::Station(StationKind::Stove),
             Tile::Hatch(Item::Tomato),
+            Tile::Conveyor(Dir::Up),
+            Tile::Ice,
+            Tile::Bin,
         ];
         let files = items
             .map(item_sprite)
