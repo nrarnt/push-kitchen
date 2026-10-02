@@ -1,15 +1,14 @@
 use std::collections::BTreeSet;
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 
-/// Which kitchens have been solved. Kept in a file between runs of the game.
+/// Which kitchens have been solved. Saved between runs of the game.
 #[derive(Resource, Debug, Default, PartialEq)]
 pub struct Progress {
-    /// Level ids. A `BTreeSet` keeps them sorted, so the file comes out the
-    /// same whatever order the levels were solved in.
+    /// Level ids. A `BTreeSet` keeps them sorted, so the saved text comes out
+    /// the same whatever order the levels were solved in.
     solved: BTreeSet<String>,
 }
 
@@ -23,14 +22,10 @@ impl Progress {
         self.solved.insert(id.to_string())
     }
 
-    /// Reads a progress file: one level id per line. If there is no file yet,
-    /// nothing has been solved yet.
-    pub fn load(file: &Path) -> io::Result<Progress> {
-        let text = match fs::read_to_string(file) {
-            Ok(text) => text,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-            Err(error) => return Err(error),
-        };
+    /// Reads saved progress: one level id per line. Nothing saved yet means
+    /// nothing solved yet.
+    pub fn load(slot: &SaveSlot) -> io::Result<Progress> {
+        let text = slot.read()?;
         let solved = text
             .lines()
             .map(str::trim)
@@ -40,38 +35,105 @@ impl Progress {
         Ok(Progress { solved })
     }
 
-    /// Writes the progress file, creating its folder if needed.
-    pub fn save(&self, file: &Path) -> io::Result<()> {
-        if let Some(folder) = file.parent() {
-            fs::create_dir_all(folder)?;
-        }
+    pub fn save(&self, slot: &SaveSlot) -> io::Result<()> {
         let lines: Vec<&str> = self.solved.iter().map(String::as_str).collect();
-        fs::write(file, lines.join("\n"))
+        slot.write(&lines.join("\n"))
     }
 }
 
-/// Where the progress file is kept.
-#[derive(Resource)]
-pub struct ProgressFile(pub PathBuf);
-
-/// The progress file of the real game, in the place macOS gives each app for
-/// its own data. Without a home folder, it goes next to where the game runs.
-pub fn default_progress_file() -> PathBuf {
-    let folder = match std::env::var_os("HOME") {
-        Some(home) => PathBuf::from(home).join("Library/Application Support/Push Kitchen"),
-        None => PathBuf::new(),
-    };
-    folder.join("progress.txt")
+/// Where progress is kept between runs of the game.
+#[derive(Resource, Debug, Clone)]
+pub enum SaveSlot {
+    /// A text file: on a computer, and in the tests.
+    // The web version never makes one of these.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    File(PathBuf),
+    /// The storage a browser keeps for this web page.
+    #[cfg(target_arch = "wasm32")]
+    Browser,
 }
 
-/// A progress file that belongs to one test only, in the system's temp folder.
-/// It does not exist yet when the test starts.
+impl SaveSlot {
+    /// The save slot of the real game: a file in the place macOS gives each
+    /// app for its own data, or the browser's storage on the web.
+    pub fn for_this_platform() -> SaveSlot {
+        #[cfg(target_arch = "wasm32")]
+        return SaveSlot::Browser;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Without a home folder, the file goes next to where the game runs.
+            let folder = match std::env::var_os("HOME") {
+                Some(home) => PathBuf::from(home).join("Library/Application Support/Push Kitchen"),
+                None => PathBuf::new(),
+            };
+            SaveSlot::File(folder.join("progress.txt"))
+        }
+    }
+
+    /// The saved text, or an empty string if nothing was saved yet.
+    fn read(&self) -> io::Result<String> {
+        match self {
+            SaveSlot::File(file) => match std::fs::read_to_string(file) {
+                Ok(text) => Ok(text),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+                Err(error) => Err(error),
+            },
+            #[cfg(target_arch = "wasm32")]
+            SaveSlot::Browser => browser::read(),
+        }
+    }
+
+    fn write(&self, text: &str) -> io::Result<()> {
+        match self {
+            SaveSlot::File(file) => {
+                if let Some(folder) = file.parent() {
+                    std::fs::create_dir_all(folder)?;
+                }
+                std::fs::write(file, text)
+            }
+            #[cfg(target_arch = "wasm32")]
+            SaveSlot::Browser => browser::write(text),
+        }
+    }
+}
+
+/// Saving in a web page: the browser's `localStorage`, a small set of named
+/// texts it keeps for each website.
+#[cfg(target_arch = "wasm32")]
+mod browser {
+    use std::io;
+
+    const KEY: &str = "push-kitchen-progress";
+
+    fn storage() -> io::Result<web_sys::Storage> {
+        web_sys::window()
+            .and_then(|window| window.local_storage().ok().flatten())
+            .ok_or_else(|| io::Error::other("this browser gives the page no storage"))
+    }
+
+    pub fn read() -> io::Result<String> {
+        let saved = storage()?
+            .get_item(KEY)
+            .map_err(|_| io::Error::other("the browser would not read the saved progress"))?;
+        Ok(saved.unwrap_or_default())
+    }
+
+    pub fn write(text: &str) -> io::Result<()> {
+        storage()?
+            .set_item(KEY, text)
+            .map_err(|_| io::Error::other("the browser would not save the progress"))
+    }
+}
+
+/// A save slot that belongs to one test only: a file in the system's temp
+/// folder that does not exist yet when the test starts.
 #[cfg(test)]
-pub fn scratch_file(test: &str) -> PathBuf {
+pub fn scratch_slot(test: &str) -> SaveSlot {
     let folder = std::env::temp_dir().join(format!("push-kitchen-test-{test}"));
     // Whatever an earlier run of the same test left behind. Fine if there is nothing.
-    let _ = fs::remove_dir_all(&folder);
-    folder.join("progress.txt")
+    let _ = std::fs::remove_dir_all(&folder);
+    SaveSlot::File(folder.join("progress.txt"))
 }
 
 #[cfg(test)]
@@ -100,38 +162,35 @@ mod tests {
 
     #[test]
     fn saved_progress_can_be_loaded_again() {
-        let file = scratch_file("save-and-load");
+        let slot = scratch_slot("save-and-load");
         let mut progress = Progress::default();
         progress.mark_solved("soup");
         progress.mark_solved("salad");
 
-        progress.save(&file).expect("saving should work");
-        assert_eq!(Progress::load(&file).expect("loading should work"), progress);
+        progress.save(&slot).expect("saving should work");
+        assert_eq!(Progress::load(&slot).expect("loading should work"), progress);
     }
 
     #[test]
-    fn loading_a_missing_file_gives_empty_progress() {
-        let file = scratch_file("missing");
-        assert_eq!(Progress::load(&file).expect("loading should work"), Progress::default());
+    fn loading_before_anything_was_saved_gives_empty_progress() {
+        let slot = scratch_slot("missing");
+        assert_eq!(Progress::load(&slot).expect("loading should work"), Progress::default());
     }
 
     #[test]
     fn loading_skips_blank_lines() {
-        let file = scratch_file("blank-lines");
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, "soup\n\n  salad  \n").unwrap();
+        let slot = scratch_slot("blank-lines");
+        slot.write("soup\n\n  salad  \n").expect("writing should work");
 
-        let progress = Progress::load(&file).expect("loading should work");
+        let progress = Progress::load(&slot).expect("loading should work");
         assert!(progress.is_solved("soup"));
         assert!(progress.is_solved("salad"));
         assert!(!progress.is_solved(""));
     }
 
     #[test]
-    fn the_real_progress_file_is_called_progress_txt() {
-        assert_eq!(
-            default_progress_file().file_name().unwrap(),
-            "progress.txt"
-        );
+    fn on_a_computer_progress_is_saved_to_progress_txt() {
+        let SaveSlot::File(file) = SaveSlot::for_this_platform();
+        assert_eq!(file.file_name().unwrap(), "progress.txt");
     }
 }

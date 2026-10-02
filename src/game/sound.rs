@@ -17,6 +17,19 @@ pub enum Sfx {
     Solved,
 }
 
+impl Sfx {
+    const ALL: [Sfx; 8] = [
+        Sfx::Step,
+        Sfx::Push,
+        Sfx::Chop,
+        Sfx::Sizzle,
+        Sfx::Combine,
+        Sfx::Bin,
+        Sfx::Bump,
+        Sfx::Solved,
+    ];
+}
+
 /// The sound's file, inside the `assets` folder.
 fn file(sfx: Sfx) -> &'static str {
     match sfx {
@@ -53,6 +66,11 @@ pub fn sound_of_move(before: &Board, after: &Board) -> Sfx {
         Some((_, Item::ChoppedTomato)) => Sfx::Chop,
         Some(_) => Sfx::Sizzle,
     }
+}
+
+/// Starts loading every sound, and returns the handles that keep them loaded.
+pub fn preload(assets: &AssetServer) -> Vec<Handle<AudioSource>> {
+    Sfx::ALL.into_iter().map(|sfx| assets.load(file(sfx))).collect()
 }
 
 /// Plays a sound once. The entity that plays it removes itself when done.
@@ -133,17 +151,7 @@ mod tests {
 
     #[test]
     fn every_sound_has_its_file() {
-        let all = [
-            Sfx::Step,
-            Sfx::Push,
-            Sfx::Chop,
-            Sfx::Sizzle,
-            Sfx::Combine,
-            Sfx::Bin,
-            Sfx::Bump,
-            Sfx::Solved,
-        ];
-        for sfx in all {
+        for sfx in Sfx::ALL {
             let path = Path::new("assets").join(file(sfx));
             assert!(path.is_file(), "{} is missing", path.display());
         }

@@ -65,6 +65,19 @@ pub enum Item {
     Toastie,
 }
 
+impl Item {
+    /// Every kind of item. A new kind has to be added here too.
+    pub const ALL: [Item; 7] = [
+        Item::Tomato,
+        Item::ChoppedTomato,
+        Item::TomatoSoup,
+        Item::Bread,
+        Item::Cheese,
+        Item::Sandwich,
+        Item::Toastie,
+    ];
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

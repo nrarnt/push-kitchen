@@ -71,7 +71,7 @@ Two layers with a one-way dependency: Bevy code knows the puzzle core, the core 
 
 ```
 push-kitchen/
-  Cargo.toml              bevy 0.19, dev-profile speedups
+  Cargo.toml              bevy 0.19 (2D and sound only), dev-profile speedups, web profile
   assets/levels/*.txt     ASCII kitchens (# wall, @ chef, t tomato, ...)
   src/
     main.rs               builds the Bevy App, registers plugins
@@ -84,7 +84,7 @@ push-kitchen/
     game/                 BEVY LAYER
       mod.rs              GamePlugin, app states (Menu / Playing), selected level
       levels.rs           the list of kitchens, baked in with include_str!
-      progress.rs         which kitchens are solved, saved to a file
+      progress.rs         which kitchens are solved, saved to a file (or the browser's storage)
       session.rs          Resource: current Board + undo history (Vec<Board>)
       input.rs            keys while playing -> move / undo / restart / next / menu
       view.rs             draws the Board with sprites, slides what moved
@@ -94,17 +94,38 @@ push-kitchen/
   assets/sounds/*.wav     one file per sound effect
   tools/make_sprites.py   draws the sprites (Python + Pillow)
   tools/make_sounds.py    synthesises the sounds (plain Python)
+  tools/build_web.sh      builds the browser version into web/dist
+  web/index.html          the page the browser version runs in
 ```
 
 The sprites and sounds are original, made by the two scripts in `tools/`. To use other art or sounds (a Kenney pack, say), replace a file in `assets/` with one of the same name; no code changes.
 
 Sliding: the board does not track which item is which, so `Session` keeps the board from before the latest change and the view compares the two to see what moved. Anything that moved is drawn on its old square and slides to the new one in 0.12 s.
 
-`cargo run` finds `assets/` in the project folder. A binary started any other way looks for `assets/` next to itself, which milestone 7's release build has to provide.
+`cargo run` finds `assets/` in the project folder. A binary started any other way looks for `assets/` next to itself.
+
+## Web build
+
+`tools/build_web.sh` compiles the game to WebAssembly and puts everything a web host needs into `web/dist`: `index.html`, the `.wasm` file, the JavaScript that loads it, and `assets/`. It is a folder of plain files; any static host can serve it. The script's header lists the two tools it needs.
+
+What differs in a browser:
+
+- The game draws into the page's `<canvas id="game">`. The camera always shows an 800 x 720 view, scaled to fit, so every kitchen and the whole menu fit any window. Tests check that each level and the menu fit that view.
+- Assets are fetched over HTTP one by one, so they are preloaded by name (a browser cannot list a folder).
+- Progress goes to `localStorage` instead of a file (`SaveSlot` in `progress.rs`).
+- Browsers keep sound off until the first key press or click; `index.html` switches it on then.
+- Keyboard only: there are no touch controls, so it is not playable on a phone.
+- A browser stops drawing a page that is not visible, so the game stands still in a background tab and carries on when the tab is shown again.
+
+## Keyboard input
+
+The game reads key presses one by one, in the order they happened (Bevy's `KeyboardInput` messages), instead of asking each frame which keys are down. That way no press is lost when several arrive in the same frame, for example after a stutter. A key that is held down counts once.
+
+When the screen changes (menu to level, level to menu, level to next level), key presses that have not been handled yet are thrown away, so a key meant for the old screen is never acted on by the new one.
 
 There is no separate "solved" state: a solved kitchen stays on screen in `Playing`, shows "Solved!", and Enter moves on to the next one.
 
-Every kitchen can be played from the start; the menu marks the solved ones and opens on the first unsolved one. Progress is a text file with one level id per line, at `~/Library/Application Support/Push Kitchen/progress.txt`.
+Every kitchen can be played from the start; the menu marks the solved ones and opens on the first unsolved one. Progress is text with one level id per line. On a computer it is the file `~/Library/Application Support/Push Kitchen/progress.txt`; in a browser it is kept in the page's `localStorage`, so it belongs to that browser on that device.
 
 Key idea: `Board::step` is a pure function (old board + direction → new board, or `None` if the move is illegal). Undo is pushing/popping boards on a `Vec`. All rules are tested with `cargo test`, no window needed.
 
@@ -121,12 +142,12 @@ Each milestone ends with something runnable.
 | 4 | Game shell | Several levels, level select, saved progress | `Result`, `?`, custom error type, file I/O, Bevy states |
 | 5 | Look and feel | Real sprites, sliding movement, sounds | assets, `Time`, interpolation |
 | 6 | Twists | Conveyors, ice, bin | iterators, refactoring `step` into phases |
-| 7 | Content | 10 to 15 kitchens, playtesting, macOS release build | `cargo build --release`, bundling |
+| 7 | Content | 12 kitchens, playtesting, web build playable in a browser | WebAssembly, `cfg` for per-platform code, build profiles |
 
 ## Verification
 
 - `cargo test`: every puzzle rule (move, push, blocked push, transform, combine, solved) has a unit test.
-- `cargo test -- --ignored`: searches every kitchen for a solution. Takes a few seconds, so it is left out of the plain `cargo test`; run it after adding or changing a level.
+- `cargo test -- --ignored --nocapture`: searches every kitchen for a solution and prints the fewest moves each one needs. Slow, so it is left out of the plain `cargo test`; run it after adding or changing a level.
 - `cargo run`: play the current level set by hand.
 - `cargo clippy`: no warnings.
 

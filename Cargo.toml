@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# "wav" lets Bevy play the .wav files in assets/sounds.
-bevy = { version = "0.19", features = ["wav"] }
+# Only the parts of Bevy this game uses: everything for 2D, and sound with
+# .wav files. Leaving out 3D and the rest makes the web version much smaller.
+bevy = { version = "0.19", default-features = false, features = ["2d", "bevy_audio", "wav"] }
 
 # Our own code: light optimisation, so recompiles stay fast.
 [profile.dev]
@@ -14,3 +15,21 @@ opt-level = 1
 # Dependencies (Bevy): full optimisation. Compiled once, then cached.
 [profile.dev.package."*"]
 opt-level = 3
+
+# Only when building for the browser: access to the page's own storage,
+# where the web version keeps the saved progress.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Storage", "Window"] }
+
+# The web build (see tools/build_web.sh). Optimised for size rather than
+# speed, because the browser has to download the whole program first.
+[profile.web]
+inherits = "release"
+opt-level = "s"
+# Leaves out the names of all functions, which are only useful for debugging
+# and would more than double the size of the file.
+strip = true
+# Optimise across all crates at once, dropping what is never used. Slow to
+# build, smaller to download.
+lto = true
+codegen-units = 1

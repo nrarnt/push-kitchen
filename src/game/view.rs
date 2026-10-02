@@ -1,3 +1,4 @@
+use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 
 use super::Selected;
@@ -7,6 +8,10 @@ use crate::puzzle::{Board, Dir, Item, Pos, StationKind, Tile};
 
 /// Side of one grid square, in pixels.
 const TILE_SIZE: f32 = 64.0;
+/// The part of the scene that is always in view, whatever the shape of the
+/// window or web page. A bigger window shows it larger.
+pub const VIEW_WIDTH: f32 = 800.0;
+pub const VIEW_HEIGHT: f32 = 720.0;
 /// How long a sprite takes to slide one square.
 const SLIDE_SECONDS: f32 = 0.12;
 
@@ -52,6 +57,30 @@ fn item_sprite(item: Item) -> &'static str {
         Item::Sandwich => "sprites/sandwich.png",
         Item::Toastie => "sprites/toastie.png",
     }
+}
+
+/// One tile of each kind that has its own picture.
+const TILE_KINDS: [Tile; 8] = [
+    Tile::Floor,
+    Tile::Wall,
+    Tile::Station(StationKind::ChoppingBoard),
+    Tile::Station(StationKind::Stove),
+    Tile::Hatch(Item::Tomato),
+    Tile::Conveyor(Dir::Up),
+    Tile::Ice,
+    Tile::Bin,
+];
+
+/// Every picture file the game uses.
+fn sprite_files() -> impl Iterator<Item = &'static str> {
+    let items = Item::ALL.into_iter().map(item_sprite);
+    let tiles = TILE_KINDS.into_iter().map(tile_sprite);
+    items.chain(tiles).chain([CHEF_SPRITE])
+}
+
+/// Starts loading every picture, and returns the handles that keep them loaded.
+pub fn preload(assets: &AssetServer) -> Vec<Handle<Image>> {
+    sprite_files().map(|file| assets.load(file)).collect()
 }
 
 /// Marks everything a screen drew, so it can be cleared again.
@@ -175,7 +204,16 @@ fn spawn_piece(
 }
 
 pub fn spawn_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    commands.spawn((
+        Camera2d,
+        Projection::Orthographic(OrthographicProjection {
+            scaling_mode: ScalingMode::AutoMin {
+                min_width: VIEW_WIDTH,
+                min_height: VIEW_HEIGHT,
+            },
+            ..OrthographicProjection::default_2d()
+        }),
+    ));
 }
 
 /// Throws away the old picture and draws the current board from scratch.
@@ -350,33 +388,22 @@ mod tests {
 
     #[test]
     fn every_picture_has_its_file() {
-        let items = [
-            Item::Tomato,
-            Item::ChoppedTomato,
-            Item::TomatoSoup,
-            Item::Bread,
-            Item::Cheese,
-            Item::Sandwich,
-            Item::Toastie,
-        ];
-        let tiles = [
-            Tile::Floor,
-            Tile::Wall,
-            Tile::Station(StationKind::ChoppingBoard),
-            Tile::Station(StationKind::Stove),
-            Tile::Hatch(Item::Tomato),
-            Tile::Conveyor(Dir::Up),
-            Tile::Ice,
-            Tile::Bin,
-        ];
-        let files = items
-            .map(item_sprite)
-            .into_iter()
-            .chain(tiles.map(tile_sprite))
-            .chain([CHEF_SPRITE]);
-        for file in files {
+        for file in sprite_files() {
             let path = Path::new("assets").join(file);
             assert!(path.is_file(), "{} is missing", path.display());
+        }
+    }
+
+    #[test]
+    fn every_level_fits_in_the_view() {
+        // Room for the title above the board and the key help below it.
+        let captions = 2.0 * 64.0;
+        for level in LEVELS {
+            let board = level.board();
+            let width = board.width() as f32 * TILE_SIZE;
+            let height = board.height() as f32 * TILE_SIZE + captions;
+            assert!(width <= VIEW_WIDTH, "{} is too wide", level.id);
+            assert!(height <= VIEW_HEIGHT, "{} is too tall", level.id);
         }
     }
 }

@@ -53,6 +53,31 @@ pub const LEVELS: &[Level] = &[
         name: "Leftovers",
         text: include_str!("../../assets/levels/leftovers.txt"),
     },
+    Level {
+        id: "mind-the-gap",
+        name: "Mind the gap",
+        text: include_str!("../../assets/levels/mind_the_gap.txt"),
+    },
+    Level {
+        id: "cheese-on-ice",
+        name: "Cheese on ice",
+        text: include_str!("../../assets/levels/cheese_on_ice.txt"),
+    },
+    Level {
+        id: "ice-rink",
+        name: "Ice rink",
+        text: include_str!("../../assets/levels/ice_rink.txt"),
+    },
+    Level {
+        id: "soup-line",
+        name: "Soup line",
+        text: include_str!("../../assets/levels/soup_line.txt"),
+    },
+    Level {
+        id: "dinner-service",
+        name: "Dinner service",
+        text: include_str!("../../assets/levels/dinner_service.txt"),
+    },
 ];
 
 #[cfg(test)]
@@ -74,35 +99,36 @@ mod tests {
     }
 
     /// Tries every sequence of moves, shortest first, until one solves the
-    /// board or there is nothing new left to try.
-    fn can_be_solved(start: Board) -> bool {
+    /// board or there is nothing new left to try. Returns how many moves the
+    /// shortest solution takes, or `None` if there is no solution.
+    fn fewest_moves(start: Board) -> Option<usize> {
         let mut seen = HashSet::from([key(&start)]);
-        let mut to_try = VecDeque::from([start]);
+        let mut to_try = VecDeque::from([(start, 0)]);
 
-        while let Some(board) = to_try.pop_front() {
+        while let Some((board, moves)) = to_try.pop_front() {
             if board.is_solved() {
-                return true;
+                return Some(moves);
             }
             for dir in [Dir::Up, Dir::Down, Dir::Left, Dir::Right] {
                 if let Some(next) = board.step(dir)
                     && seen.insert(key(&next))
                 {
-                    to_try.push_back(next);
+                    to_try.push_back((next, moves + 1));
                 }
             }
         }
-        false
+        None
     }
 
     #[test]
     fn the_solver_finds_a_solution() {
-        assert!(can_be_solved(puzzle::parse("#@.tT#").unwrap()));
+        assert_eq!(fewest_moves(puzzle::parse("#@.tT#").unwrap()), Some(2));
     }
 
     #[test]
     fn the_solver_notices_a_dead_end() {
         // The tomato is stuck against the left wall, away from its hatch.
-        assert!(!can_be_solved(puzzle::parse("#t@.T#").unwrap()));
+        assert_eq!(fewest_moves(puzzle::parse("#t@.T#").unwrap()), None);
     }
 
     #[test]
@@ -126,10 +152,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "takes a few seconds; run with `cargo test -- --ignored` after changing a level"]
+    #[ignore = "slow; run with `cargo test -- --ignored --nocapture` after changing a level"]
     fn every_level_can_be_solved() {
         for level in LEVELS {
-            assert!(can_be_solved(level.board()), "{} cannot be solved", level.id);
+            let moves = fewest_moves(level.board());
+            assert!(moves.is_some(), "{} cannot be solved", level.id);
+            // Shown with --nocapture: a rough measure of how hard each level is.
+            println!("{:16} {:3} moves", level.id, moves.unwrap());
         }
     }
 }
