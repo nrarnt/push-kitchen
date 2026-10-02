@@ -70,12 +70,18 @@ push-kitchen/
       recipes.rs          transform(station, item), combine(a, b)
       level.rs            parse(&str) -> Result<Board, LevelError>
     game/                 BEVY LAYER
-      mod.rs              GamePlugin, app states (Menu / Playing / Solved)
+      mod.rs              GamePlugin, app states (Menu / Playing), selected level
+      levels.rs           the list of kitchens, baked in with include_str!
+      progress.rs         which kitchens are solved, saved to a file
       session.rs          Resource: current Board + undo history (Vec<Board>)
-      input.rs            keys -> Dir / undo / restart -> session
-      view.rs             spawn + sync sprites from Board, move animation
-      ui.rs               level select, "solved" screen
+      input.rs            keys while playing -> move / undo / restart / next / menu
+      view.rs             draws the Board, move animation
+      ui.rs               level select menu
 ```
+
+There is no separate "solved" state: a solved kitchen stays on screen in `Playing`, shows "Solved!", and Enter moves on to the next one.
+
+Every kitchen can be played from the start; the menu marks the solved ones and opens on the first unsolved one. Progress is a text file with one level id per line, at `~/Library/Application Support/Push Kitchen/progress.txt`.
 
 Key idea: `Board::step` is a pure function (old board + direction → new board, or `None` if the move is illegal). Undo is pushing/popping boards on a `Vec`. All rules are tested with `cargo test`, no window needed.
 
@@ -97,6 +103,7 @@ Each milestone ends with something runnable.
 ## Verification
 
 - `cargo test`: every puzzle rule (move, push, blocked push, transform, combine, solved) has a unit test.
+- `cargo test -- --ignored`: searches every kitchen for a solution. Takes a few seconds, so it is left out of the plain `cargo test`; run it after adding or changing a level.
 - `cargo run`: play the current level set by hand.
 - `cargo clippy`: no warnings.
 

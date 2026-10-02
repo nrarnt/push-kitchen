@@ -48,7 +48,7 @@ pub enum StationKind {
 }
 
 /// Something the chef can push.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Item {
     Tomato,
     ChoppedTomato,

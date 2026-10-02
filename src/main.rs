@@ -12,6 +12,8 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(game::GamePlugin)
+        .add_plugins(game::GamePlugin {
+            progress_file: game::default_progress_file(),
+        })
         .run();
 }

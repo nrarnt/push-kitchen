@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
+use super::levels::LEVELS;
 use super::session::Session;
+use super::{Screen, Selected};
 use crate::puzzle::Dir;
 
 /// What the player asked for with a key press.
@@ -9,6 +11,9 @@ enum Command {
     Move(Dir),
     Undo,
     Restart,
+    /// On to the next kitchen. Only does something once this one is solved.
+    Next,
+    Menu,
 }
 
 /// The command for the key that went down this frame, if any.
@@ -27,17 +32,36 @@ fn command(keys: &ButtonInput<KeyCode>) -> Option<Command> {
         Some(Command::Undo)
     } else if keys.just_pressed(KeyCode::KeyR) {
         Some(Command::Restart)
+    } else if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
+        Some(Command::Next)
+    } else if keys.just_pressed(KeyCode::Escape) {
+        Some(Command::Menu)
     } else {
         None
     }
 }
 
-pub fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut session: ResMut<Session>) {
+pub fn handle_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut session: ResMut<Session>,
+    mut selected: ResMut<Selected>,
+    mut screen: ResMut<NextState<Screen>>,
+) {
     match command(&keys) {
         Some(Command::Move(dir)) => session.step(dir),
         Some(Command::Undo) => session.undo(),
         Some(Command::Restart) => session.restart(),
-        None => {}
+        Some(Command::Next) if session.board().is_solved() => {
+            if selected.0 + 1 < LEVELS.len() {
+                // Entering `Playing` again starts the newly selected level.
+                selected.0 += 1;
+                screen.set(Screen::Playing);
+            } else {
+                screen.set(Screen::Menu);
+            }
+        }
+        Some(Command::Menu) => screen.set(Screen::Menu),
+        Some(Command::Next) | None => {}
     }
 }
 
@@ -82,6 +106,17 @@ mod tests {
     #[test]
     fn r_restarts() {
         assert_eq!(command(&pressing(KeyCode::KeyR)), Some(Command::Restart));
+    }
+
+    #[test]
+    fn enter_and_space_ask_for_the_next_kitchen() {
+        assert_eq!(command(&pressing(KeyCode::Enter)), Some(Command::Next));
+        assert_eq!(command(&pressing(KeyCode::Space)), Some(Command::Next));
+    }
+
+    #[test]
+    fn escape_goes_to_the_menu() {
+        assert_eq!(command(&pressing(KeyCode::Escape)), Some(Command::Menu));
     }
 
     #[test]

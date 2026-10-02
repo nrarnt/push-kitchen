@@ -56,6 +56,11 @@ impl Board {
         self.items.get(&pos).copied()
     }
 
+    /// Every item in the kitchen with the square it is on, in no particular order.
+    pub fn items(&self) -> impl Iterator<Item = (Pos, Item)> {
+        self.items.iter().map(|(&pos, &item)| (pos, item))
+    }
+
     /// The board after the chef tries to move one square in `dir`,
     /// or `None` if the move is not allowed.
     pub fn step(&self, dir: Dir) -> Option<Board> {
@@ -123,6 +128,17 @@ mod tests {
         let board = board("#@.#\n####");
         assert_eq!(board.width(), 4);
         assert_eq!(board.height(), 2);
+    }
+
+    #[test]
+    fn items_lists_every_item_with_its_square() {
+        let board = board("#@t.b#");
+        let mut items: Vec<(Pos, Item)> = board.items().collect();
+        items.sort_by_key(|(pos, _)| pos.x);
+        assert_eq!(
+            items,
+            vec![(Pos::new(2, 0), Item::Tomato), (Pos::new(4, 0), Item::Bread)]
+        );
     }
 
     #[test]

@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use super::Selected;
+use super::levels::LEVELS;
 use super::session::Session;
 use crate::puzzle::{Item, Pos, StationKind, Tile};
 
@@ -11,11 +13,19 @@ const ITEM_SCALE: f32 = 0.7;
 pub const BACKGROUND: Color = Color::srgb(0.10, 0.10, 0.13);
 const CHEF: Color = Color::srgb(0.95, 0.95, 0.98);
 const DARK_TEXT: Color = Color::srgb(0.12, 0.12, 0.14);
-const LIGHT_TEXT: Color = Color::srgb(0.96, 0.96, 0.96);
+pub const LIGHT_TEXT: Color = Color::srgb(0.96, 0.96, 0.96);
+pub const DIM_TEXT: Color = Color::srgb(0.60, 0.60, 0.66);
 
-/// Marks everything `draw_board` put on screen, so it can be cleared again.
+/// Marks everything a screen drew, so it can be cleared again.
 #[derive(Component)]
 pub struct Drawn;
+
+/// Removes the picture of whichever screen was drawn last.
+pub fn clear(commands: &mut Commands, drawn: &Query<Entity, With<Drawn>>) {
+    for entity in drawn {
+        commands.entity(entity).despawn();
+    }
+}
 
 fn tile_colour(tile: Tile) -> Color {
     match tile {
@@ -90,10 +100,16 @@ fn label(
 }
 
 /// A line of text centred at height `y`.
-fn caption(text: &str, font_size: f32, y: f32) -> (Text2d, TextFont, Transform) {
+pub fn caption(
+    text: &str,
+    font_size: f32,
+    colour: Color,
+    y: f32,
+) -> (Text2d, TextFont, TextColor, Transform) {
     (
         Text2d::new(text),
         TextFont::from_font_size(font_size),
+        TextColor(colour),
         Transform::from_xyz(0.0, y, 3.0),
     )
 }
@@ -103,10 +119,13 @@ pub fn spawn_camera(mut commands: Commands) {
 }
 
 /// Throws away the old picture and draws the current board from scratch.
-pub fn draw_board(mut commands: Commands, session: Res<Session>, drawn: Query<Entity, With<Drawn>>) {
-    for entity in &drawn {
-        commands.entity(entity).despawn();
-    }
+pub fn draw_board(
+    mut commands: Commands,
+    session: Res<Session>,
+    selected: Res<Selected>,
+    drawn: Query<Entity, With<Drawn>>,
+) {
+    clear(&mut commands, &drawn);
 
     let board = session.board();
     let (width, height) = (board.width(), board.height());
@@ -131,23 +150,29 @@ pub fn draw_board(mut commands: Commands, session: Res<Session>, drawn: Query<En
                 }
                 Tile::Floor | Tile::Wall => {}
             }
-
-            if let Some(item) = board.item(pos) {
-                commands.spawn((Drawn, square(item_colour(item), ITEM_SCALE, centre, 1.0)));
-                commands.spawn((Drawn, label(item_name(item), DARK_TEXT, centre, 1.1)));
-            }
         }
+    }
+
+    for (pos, item) in board.items() {
+        let centre = square_centre(pos, width, height);
+        commands.spawn((Drawn, square(item_colour(item), ITEM_SCALE, centre, 1.0)));
+        commands.spawn((Drawn, label(item_name(item), DARK_TEXT, centre, 1.1)));
     }
 
     let chef = square_centre(board.chef(), width, height);
     commands.spawn((Drawn, square(CHEF, 0.5, chef, 2.0)));
 
+    let (title, keys) = if board.is_solved() {
+        ("Solved!", "Enter: next kitchen    Z: undo    Esc: menu")
+    } else {
+        (
+            LEVELS[selected.0].name,
+            "Arrows or WASD: move    Z: undo    R: restart    Esc: menu",
+        )
+    };
     let board_top = height as f32 * TILE_SIZE / 2.0;
-    let keys = "Arrows or WASD: move    Z: undo    R: restart";
-    commands.spawn((Drawn, caption(keys, 20.0, -board_top - 30.0)));
-    if board.is_solved() {
-        commands.spawn((Drawn, caption("Solved!", 48.0, board_top + 40.0)));
-    }
+    commands.spawn((Drawn, caption(title, 40.0, LIGHT_TEXT, board_top + 40.0)));
+    commands.spawn((Drawn, caption(keys, 20.0, DIM_TEXT, -board_top - 30.0)));
 }
 
 #[cfg(test)]
